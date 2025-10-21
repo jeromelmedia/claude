@@ -694,7 +694,7 @@ PREMISE: [Korean translation]"""
 
             # Step 2: Poll for completion
             print("Waiting for voiceover generation...")
-            max_attempts = 60  # 5 minutes max (60 × 5 seconds)
+            max_attempts = 180  # 15 minutes max (180 × 5 seconds) - long scripts need more time
             attempt = 0
 
             while attempt < max_attempts:
@@ -747,7 +747,7 @@ PREMISE: [Korean translation]"""
 
                 attempt += 1
 
-            raise Exception("Task timed out after 5 minutes")
+            raise Exception("Task timed out after 15 minutes")
 
         except Exception as e:
             print(f"\n✗ Voiceover generation failed: {e}")
