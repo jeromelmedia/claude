@@ -720,8 +720,13 @@ PREMISE: [Korean translation]"""
                     if not result_url:
                         raise Exception("No result URL in completed task")
 
+                    # Fix relative URL paths from API
+                    if not result_url.startswith('http'):
+                        result_url = f"https://genaipro.vn{result_url}"
+
                     # Step 3: Download the MP3 file
                     print(f"\n✓ Voiceover generated! Downloading...")
+                    print(f"  URL: {result_url}")
                     mp3_response = requests.get(result_url, timeout=60)
 
                     if mp3_response.status_code == 200:
