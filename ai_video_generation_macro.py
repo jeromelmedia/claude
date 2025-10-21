@@ -87,8 +87,41 @@ class VideoGenerationMacro:
         print(f"\nUsing Claude model: {self.model}")
         print(f"Project ID: {self.project_id}")
 
-        self.working_dir = Path("./output")
-        self.working_dir.mkdir(exist_ok=True)
+        # Base output directory - subfolders will be created per video
+        self.base_output_dir = Path("./output")
+        self.base_output_dir.mkdir(exist_ok=True)
+        self.working_dir = None  # Will be set after title generation
+
+    def sanitize_filename(self, text: str, max_length: int = 100) -> str:
+        """Sanitize text to be safe for use as a folder/file name.
+
+        Args:
+            text: Text to sanitize
+            max_length: Maximum length of resulting filename
+
+        Returns:
+            Sanitized text safe for filesystem use
+        """
+        # Remove or replace invalid characters
+        invalid_chars = '<>:"/\\|?*'
+        for char in invalid_chars:
+            text = text.replace(char, '')
+
+        # Replace multiple spaces with single space
+        text = ' '.join(text.split())
+
+        # Remove leading/trailing dots and spaces
+        text = text.strip('. ')
+
+        # Truncate to max length
+        if len(text) > max_length:
+            text = text[:max_length].strip()
+
+        # If empty after sanitization, use default
+        if not text:
+            text = "untitled_video"
+
+        return text
 
     def load_config(self, config_path: str) -> dict:
         """Load configuration from JSON file."""
@@ -1213,6 +1246,13 @@ PREMISE: [Korean translation]"""
 
             # Step 1: Generate and approve title (English only)
             english_title = self.generate_title()
+
+            # Create video-specific subfolder using sanitized title
+            folder_name = self.sanitize_filename(english_title)
+            self.working_dir = self.base_output_dir / folder_name
+            self.working_dir.mkdir(exist_ok=True)
+            print(f"\n✓ Created output folder: {self.working_dir}")
+            print(f"   All files for this video will be saved here.\n")
 
             # Step 2: Generate and approve description (English only)
             english_description = self.generate_description(english_title)
