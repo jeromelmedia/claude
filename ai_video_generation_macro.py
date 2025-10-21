@@ -1503,9 +1503,21 @@ PREMISE: [Korean translation]"""
             self.working_dir.mkdir(exist_ok=True)
             print(f"✓ Created output folder: {self.working_dir}\n")
 
-            # Check for existing voiceover or create dummy long audio
+            # Check for existing voiceover - FOR TESTING use specific file
+            # TEMPORARY: Using pre-existing voiceover for testing
+            test_voiceover_source = Path(r"C:\Users\alexh\OneDrive\Desktop\claude-claude-ai-video-generation-macro-011CULXob98hwyQZ7Ybfmrar\claude-claude-ai-video-generation-macro-011CULXob98hwyQZ7Ybfmrar\output\voiceover.mp3")
+
             voiceover_path = self.working_dir / "voiceover.mp3"
-            if not voiceover_path.exists():
+
+            if test_voiceover_source.exists():
+                print(f"🎤 Using test voiceover from: {test_voiceover_source.name}")
+                # Copy the test voiceover to working directory
+                import shutil
+                shutil.copy2(str(test_voiceover_source), str(voiceover_path))
+                print(f"✓ Copied voiceover to: {voiceover_path}\n")
+            elif voiceover_path.exists():
+                print(f"✓ Found existing voiceover: {voiceover_path}\n")
+            else:
                 print("🎤 No voiceover found - creating test voiceover (3 minutes)...")
                 print("   (Generating silent audio for testing purposes)\n")
 
@@ -1527,8 +1539,6 @@ PREMISE: [Korean translation]"""
                     voiceover_path = None
                 else:
                     print(f"✓ Created 3-minute test voiceover: {voiceover_path}\n")
-            else:
-                print(f"✓ Found existing voiceover: {voiceover_path}\n")
 
             # Create dummy subtitle file with more entries for longer video
             print("📝 Creating test subtitle file...")
