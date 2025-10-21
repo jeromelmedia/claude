@@ -1,22 +1,10 @@
 # Quick Start Guide
 
-## Setup (First Time Only)
+## Super Simple Setup (Recommended)
 
-### 1. Run Setup Script
+### 1. Configure API Keys (First Time Only)
 
-**Linux/macOS:**
-```bash
-./setup.sh
-```
-
-**Windows:**
-```bash
-setup.bat
-```
-
-### 2. Configure API Keys
-
-Edit `config.json`:
+Copy `config.example.json` to `config.json` and edit it:
 ```json
 {
   "anthropic_api_key": "sk-ant-xxxxx",
@@ -38,7 +26,7 @@ Edit `config.json`:
   - Copy the voice ID you want to use
 - **Video Clip**: Record or download a video of someone talking (MP4 format)
 
-### 3. Install Additional Software
+### 2. Install Additional Software
 
 - **CapCut**: https://www.capcut.com/
 - **FFmpeg**:
@@ -46,25 +34,38 @@ Edit `config.json`:
   - Ubuntu: `sudo apt-get install ffmpeg`
   - Windows: https://ffmpeg.org/download.html
 
+### 3. Add Your Talking Person Video
+
+Place your pre-recorded talking person video as `talking_person.mp4` in the same folder.
+
 ## Running the Macro
 
-### Activate Virtual Environment
+**NO VIRTUAL ENVIRONMENT NEEDED! Just run:**
+
+**Windows:**
+- Double-click `RUN_ME.bat`
+
+**OR from command line:**
+```bash
+python run_video_macro.py
+```
 
 **Linux/macOS:**
 ```bash
-source venv/bin/activate
+./run_me.sh
 ```
 
-**Windows:**
+**OR:**
 ```bash
-venv\Scripts\activate.bat
+python3 run_video_macro.py
 ```
 
-### Run the Script
+The launcher will **automatically**:
+- Check for required packages
+- Install missing packages
+- Run the video generation macro
 
-```bash
-python ai_video_generation_macro.py
-```
+**That's it!** No pip install, no venv activate, nothing.
 
 ## Workflow Steps
 
