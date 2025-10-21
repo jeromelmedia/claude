@@ -1317,11 +1317,96 @@ PREMISE: [Korean translation]"""
             traceback.print_exc()
             sys.exit(1)
 
+    def test_ffmpeg(self):
+        """TEST MODE: Skip all generation, just test FFmpeg video editing.
+
+        This uses dummy/pre-generated content to quickly test the video editing pipeline.
+        """
+        print("=" * 60)
+        print("AI VIDEO GENERATION MACRO - TEST MODE")
+        print("=" * 60)
+        print("⚠ Skipping content generation - testing FFmpeg only\n")
+
+        try:
+            # STEP 0: Select character
+            character_name, character_folder = self.select_character()
+
+            mp4_files = list(character_folder.glob('*.mp4'))
+            if not mp4_files:
+                print(f"\n✗ No MP4 file found in {character_folder}")
+                sys.exit(1)
+
+            self.selected_character_video = str(mp4_files[0])
+            self.selected_character_folder = character_folder
+            print(f"✓ Using video: {Path(self.selected_character_video).name}\n")
+
+            # Create test output folder
+            test_title = "Test Video FFmpeg"
+            folder_name = self.sanitize_filename(test_title)
+            self.working_dir = self.base_output_dir / folder_name
+            self.working_dir.mkdir(exist_ok=True)
+            print(f"✓ Created output folder: {self.working_dir}\n")
+
+            # Create dummy subtitle file
+            print("📝 Creating test subtitle file...")
+            subtitle_path = self.working_dir / "subtitles.srt"
+            with open(subtitle_path, 'w', encoding='utf-8') as f:
+                f.write("1\n")
+                f.write("00:00:00,000 --> 00:00:05,000\n")
+                f.write("테스트 자막입니다\n")
+                f.write("\n")
+                f.write("2\n")
+                f.write("00:00:05,000 --> 00:00:10,000\n")
+                f.write("FFmpeg 비디오 편집 테스트\n")
+                f.write("\n")
+            print(f"✓ Created test subtitles: {subtitle_path}\n")
+
+            # Check for existing voiceover or create silent audio
+            voiceover_path = self.working_dir / "voiceover.mp3"
+            if not voiceover_path.exists():
+                print("🎤 No voiceover found - video will have no audio")
+                print("   (To test with voiceover, place an MP3 file at the path above)\n")
+                voiceover_path = None
+            else:
+                print(f"✓ Found existing voiceover: {voiceover_path}\n")
+
+            # Get random images from character folder
+            print("🖼 Loading test images from character folder...")
+            num_images = self.config.get('num_images', 4)
+            image_paths = self.get_character_images(self.selected_character_folder, num_images)
+            print()
+
+            # Run FFmpeg video editing
+            print("🎬 Starting FFmpeg video editing...\n")
+            video_path = self.edit_video_ffmpeg(voiceover_path, image_paths, str(subtitle_path))
+
+            # Success!
+            print("\n" + "=" * 60)
+            print("✅ TEST COMPLETE!")
+            print("=" * 60)
+            print(f"\nVideo created: {video_path}")
+            print(f"Output folder: {self.working_dir}")
+            print("\nYou can now check if the video was created correctly!")
+
+        except Exception as e:
+            print(f"\n✗ Error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
 
 def main():
     """Main entry point."""
-    macro = VideoGenerationMacro()
-    macro.run()
+    import sys
+
+    # Check for test mode flag
+    if len(sys.argv) > 1 and sys.argv[1] == '--test':
+        print("\n🧪 Running in TEST MODE (FFmpeg only)\n")
+        macro = VideoGenerationMacro()
+        macro.test_ffmpeg()
+    else:
+        macro = VideoGenerationMacro()
+        macro.run()
 
 
 if __name__ == "__main__":
