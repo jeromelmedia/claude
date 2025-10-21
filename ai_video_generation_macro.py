@@ -1216,6 +1216,70 @@ PREMISE: [Korean translation]"""
         finally:
             driver.quit()
 
+    def resume_video(self, resume_folder: Path):
+        """Resume video generation from existing folder (skip to FFmpeg).
+
+        Args:
+            resume_folder: Path to existing output folder with voiceover/subtitles
+        """
+        print("\n⏩ RESUMING VIDEO GENERATION")
+        print("=" * 60)
+
+        try:
+            # Set working directory to resume folder
+            self.working_dir = resume_folder
+            print(f"✓ Using folder: {self.working_dir}\n")
+
+            # Check required files
+            voiceover_path = self.working_dir / "voiceover.mp3"
+            subtitle_path = self.working_dir / "subtitles.srt"
+
+            if not voiceover_path.exists():
+                print(f"✗ Missing voiceover.mp3 in {self.working_dir}")
+                sys.exit(1)
+
+            if not subtitle_path.exists():
+                print(f"✗ Missing subtitles.srt in {self.working_dir}")
+                sys.exit(1)
+
+            print("✓ Found voiceover.mp3")
+            print("✓ Found subtitles.srt\n")
+
+            # Select character for video
+            character_name, character_folder = self.select_character()
+
+            mp4_files = list(character_folder.glob('*.mp4'))
+            if not mp4_files:
+                print(f"\n✗ No MP4 file found in {character_folder}")
+                sys.exit(1)
+
+            self.selected_character_video = str(mp4_files[0])
+            self.selected_character_folder = character_folder
+            print(f"✓ Using video: {Path(self.selected_character_video).name}\n")
+
+            # Load images from character folder
+            print("🖼 Loading images from character folder...")
+            num_images = self.config.get('num_images', 4)
+            image_paths = self.get_character_images(self.selected_character_folder, num_images)
+            print()
+
+            # Run FFmpeg video editing
+            print("🎬 Starting FFmpeg video editing...\n")
+            video_path = self.edit_video_ffmpeg(str(voiceover_path), image_paths, str(subtitle_path))
+
+            # Success!
+            print("\n" + "=" * 60)
+            print("✅ VIDEO GENERATION COMPLETE!")
+            print("=" * 60)
+            print(f"\nVideo: {video_path}")
+            print(f"Output folder: {self.working_dir}")
+
+        except Exception as e:
+            print(f"\n✗ Error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+
     def run(self):
         """Run the complete video generation pipeline."""
         print("=" * 60)
@@ -1223,6 +1287,50 @@ PREMISE: [Korean translation]"""
         print("=" * 60)
 
         try:
+            # Check for existing output folders with incomplete videos
+            existing_folders = []
+            if self.base_output_dir.exists():
+                for folder in self.base_output_dir.iterdir():
+                    if folder.is_dir():
+                        voiceover = folder / "voiceover.mp3"
+                        final_video = folder / "final_video.mp4"
+                        # Has voiceover but no final video = incomplete
+                        if voiceover.exists() and not final_video.exists():
+                            existing_folders.append(folder)
+
+            # If found incomplete videos, offer to resume
+            if existing_folders:
+                print("\n🔄 Found incomplete video(s):")
+                for i, folder in enumerate(existing_folders, 1):
+                    voiceover_size = (folder / "voiceover.mp3").stat().st_size / (1024 * 1024)
+                    print(f"  {i}. {folder.name}")
+                    print(f"     Voiceover: {voiceover_size:.2f} MB")
+                    if (folder / "subtitles.srt").exists():
+                        print(f"     Subtitles: ✓")
+
+                print(f"  {len(existing_folders) + 1}. Start new video (generate from scratch)")
+                print()
+
+                while True:
+                    try:
+                        choice = input(f"Select option (1-{len(existing_folders) + 1}): ").strip()
+                        choice_idx = int(choice) - 1
+
+                        if 0 <= choice_idx < len(existing_folders):
+                            # Resume from existing folder
+                            resume_folder = existing_folders[choice_idx]
+                            print(f"\n✓ Resuming: {resume_folder.name}")
+                            return self.resume_video(resume_folder)
+                        elif choice_idx == len(existing_folders):
+                            # Start new video
+                            print("\n✓ Starting new video from scratch\n")
+                            break
+                        else:
+                            print(f"Please enter a number between 1 and {len(existing_folders) + 1}")
+                    except (ValueError, KeyboardInterrupt):
+                        print("\n✗ Cancelled")
+                        sys.exit(0)
+
             # STEP 0: Select character to use for this video
             character_name, character_folder = self.select_character()
 
