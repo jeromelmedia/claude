@@ -218,8 +218,9 @@ class VideoGenerationMacro:
                 print("Invalid input. Please try again.")
 
         # Delay after heavy API call to avoid rate limiting
-        print("⏱ Waiting 15 seconds to avoid rate limit...")
-        time.sleep(15)
+        # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
+        print("⏱ Waiting 65 seconds to avoid rate limit (this is necessary with your API limits)...")
+        time.sleep(65)
 
         return english_title
 
@@ -264,8 +265,9 @@ class VideoGenerationMacro:
         print(f"✓ Description approved")
 
         # Delay after heavy API call to avoid rate limiting
-        print("⏱ Waiting 15 seconds to avoid rate limit...")
-        time.sleep(15)
+        # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
+        print("⏱ Waiting 65 seconds to avoid rate limit (this is necessary with your API limits)...")
+        time.sleep(65)
 
         return english_description
 
@@ -310,8 +312,9 @@ class VideoGenerationMacro:
         print(f"✓ Premise approved")
 
         # Delay after heavy API call to avoid rate limiting
-        print("⏱ Waiting 15 seconds to avoid rate limit...")
-        time.sleep(15)
+        # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
+        print("⏱ Waiting 65 seconds to avoid rate limit (this is necessary with your API limits)...")
+        time.sleep(65)
 
         return english_premise
 
@@ -363,8 +366,9 @@ Target words for this segment: approximately {target_words_per_segment} words.
                     raise
 
         # Delay after heavy API call (script segments use project files)
-        print(f"  ⏱ Waiting 15 seconds to avoid rate limit...")
-        time.sleep(15)
+        # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
+        print(f"  ⏱ Waiting 65 seconds to avoid rate limit (this is necessary with your API limits)...")
+        time.sleep(65)
 
         return message.content[0].text.strip()
 
