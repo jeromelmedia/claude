@@ -122,8 +122,13 @@ class VideoGenerationMacro:
             sys.exit(1)
 
     def translate_to_korean_simple(self, text: str, label: str = "text") -> str:
-        """Translate a short text to Korean with rate limit retry."""
+        """Translate a short text to Korean with rate limit retry.
+
+        NOTE: This method does NOT use project files to save tokens.
+        Translation doesn't need the 83K+ chars of context.
+        """
         print(f"\nTranslating {label} to Korean...")
+        print("  (Using lightweight API call without project files)")
 
         max_retries = 5
         base_delay = 2
@@ -133,6 +138,8 @@ class VideoGenerationMacro:
                 message = self.claude_client.messages.create(
                     model=self.model,
                     max_tokens=1000,
+                    # NOTE: No system= parameter here = no project files sent
+                    # This saves ~20,000 tokens per translation!
                     messages=[{
                         "role": "user",
                         "content": f"Translate the following {label} to Korean. Maintain the tone and style:\n\n{text}"
@@ -415,9 +422,14 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         return full_script, korean_script
 
     def translate_to_korean(self, script: str) -> str:
-        """Translate the full English script to Korean."""
+        """Translate the full English script to Korean.
+
+        NOTE: This method does NOT use project files to save tokens.
+        Each chunk translation is lightweight (~2000 words + small prompt).
+        """
         print("\n=== Translating Full Script to Korean ===")
         print("This may take a few minutes...")
+        print("  (Using lightweight API calls without project files)")
 
         # Split script into chunks for translation (API token limits)
         chunks = []
@@ -429,22 +441,38 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             chunks.append(chunk)
 
         translated_chunks = []
+        max_retries = 3
 
         for i, chunk in enumerate(chunks, 1):
             print(f"Translating chunk {i}/{len(chunks)}...")
 
-            message = self.claude_client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                messages=[{
-                    "role": "user",
-                    "content": f"Translate the following text to Korean. Maintain the tone and style:\n\n{chunk}"
-                }]
-            )
+            # Retry logic for each chunk
+            for attempt in range(max_retries):
+                try:
+                    message = self.claude_client.messages.create(
+                        model=self.model,
+                        max_tokens=4096,
+                        # NOTE: No system= parameter = no project files sent!
+                        messages=[{
+                            "role": "user",
+                            "content": f"Translate the following text to Korean. Maintain the tone and style:\n\n{chunk}"
+                        }]
+                    )
 
-            translated = message.content[0].text.strip()
-            translated_chunks.append(translated)
-            time.sleep(1)  # Rate limiting
+                    translated = message.content[0].text.strip()
+                    translated_chunks.append(translated)
+                    break  # Success, exit retry loop
+
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                        delay = 5 * (2 ** attempt)
+                        print(f"  ⚠ Rate limit hit. Waiting {delay} seconds before retry...")
+                        time.sleep(delay)
+                    else:
+                        raise
+
+            # Small delay between chunks to avoid rate limiting
+            time.sleep(2)
 
         korean_script = "\n\n".join(translated_chunks)
 
