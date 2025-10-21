@@ -166,27 +166,37 @@ class VideoGenerationMacro:
         while True:
             print("\nGenerating English title...")
 
-            try:
-                message = self.claude_client.messages.create(
-                    model=self.model,
-                    max_tokens=500,
-                    system=self.custom_instructions,
-                    messages=[{
-                        "role": "user",
-                        "content": "Generate a compelling video title in English in the style and topic you've been trained on in this project. Just provide the title, nothing else."
-                    }]
-                )
-            except anthropic.NotFoundError as e:
-                print(f"\n✗ ERROR: Model '{self.model}' not found or not accessible")
-                print("\nYour API key doesn't have access to this model.")
-                print("\nAvailable models you can try (add 'claude_model' to config.json):")
-                print("  - claude-3-sonnet-20240229 (recommended)")
-                print("  - claude-3-haiku-20240307 (fastest)")
-                print("  - claude-3-opus-20240229 (most capable)")
-                print("  - claude-3-5-sonnet-20241022 (latest)")
-                print("\nTo check your API access, visit:")
-                print("  https://console.anthropic.com/settings/keys")
-                raise
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    message = self.claude_client.messages.create(
+                        model=self.model,
+                        max_tokens=500,
+                        system=self.custom_instructions,
+                        messages=[{
+                            "role": "user",
+                            "content": "Generate a compelling video title in English in the style and topic you've been trained on in this project. Just provide the title, nothing else."
+                        }]
+                    )
+                    break  # Success, exit retry loop
+                except anthropic.NotFoundError as e:
+                    print(f"\n✗ ERROR: Model '{self.model}' not found or not accessible")
+                    print("\nYour API key doesn't have access to this model.")
+                    print("\nAvailable models you can try (add 'claude_model' to config.json):")
+                    print("  - claude-3-sonnet-20240229 (recommended)")
+                    print("  - claude-3-haiku-20240307 (fastest)")
+                    print("  - claude-3-opus-20240229 (most capable)")
+                    print("  - claude-3-5-sonnet-20241022 (latest)")
+                    print("\nTo check your API access, visit:")
+                    print("  https://console.anthropic.com/settings/keys")
+                    raise
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                        delay = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                        print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}...")
+                        time.sleep(delay)
+                    else:
+                        raise
 
             english_title = message.content[0].text.strip()
             print(f"\nGenerated English Title: {english_title}")
@@ -206,6 +216,10 @@ class VideoGenerationMacro:
                 continue
             else:
                 print("Invalid input. Please try again.")
+
+        # Delay after heavy API call to avoid rate limiting
+        print("⏱ Waiting 15 seconds to avoid rate limit...")
+        time.sleep(15)
 
         return english_title
 
@@ -228,7 +242,7 @@ class VideoGenerationMacro:
                 break
             except Exception as e:
                 if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
-                    delay = 5 * (2 ** attempt)
+                    delay = 10 * (2 ** attempt)  # 10s, 20s, 40s
                     print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry...")
                     time.sleep(delay)
                 else:
@@ -249,21 +263,36 @@ class VideoGenerationMacro:
 
         print(f"✓ Description approved")
 
+        # Delay after heavy API call to avoid rate limiting
+        print("⏱ Waiting 15 seconds to avoid rate limit...")
+        time.sleep(15)
+
         return english_description
 
     def generate_premise(self, english_title: str) -> str:
         """Generate a 2-3 sentence premise for the video. Returns english_premise."""
         print("\n=== STEP 3: Generating Video Premise (English) ===")
 
-        message = self.claude_client.messages.create(
-            model=self.model,
-            max_tokens=500,
-            system=self.custom_instructions,
-            messages=[{
-                "role": "user",
-                "content": f"Write a 2-3 sentence premise for a video titled '{english_title}'. This explains what the video will cover and serves as a guide for the full script. Be specific about the key points that will be discussed."
-            }]
-        )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=500,
+                    system=self.custom_instructions,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Write a 2-3 sentence premise for a video titled '{english_title}'. This explains what the video will cover and serves as a guide for the full script. Be specific about the key points that will be discussed."
+                    }]
+                )
+                break  # Success, exit retry loop
+            except Exception as e:
+                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                    delay = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}...")
+                    time.sleep(delay)
+                else:
+                    raise
 
         english_premise = message.content[0].text.strip()
         print(f"\nGenerated English Premise:\n{english_premise}")
@@ -279,6 +308,10 @@ class VideoGenerationMacro:
                 return self.generate_premise(english_title)  # Regenerate
 
         print(f"✓ Premise approved")
+
+        # Delay after heavy API call to avoid rate limiting
+        print("⏱ Waiting 15 seconds to avoid rate limit...")
+        time.sleep(15)
 
         return english_premise
 
@@ -311,12 +344,27 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         prompt += f"\n\nWrite approximately {target_words_per_segment} words in your trained writing style."
 
-        message = self.claude_client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            system=self.custom_instructions,
-            messages=[{"role": "user", "content": prompt}]
-        )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=self.custom_instructions,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break  # Success, exit retry loop
+            except Exception as e:
+                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                    delay = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                    print(f"  ⚠ Rate limit hit. Waiting {delay} seconds before retry...")
+                    time.sleep(delay)
+                else:
+                    raise
+
+        # Delay after heavy API call (script segments use project files)
+        print(f"  ⏱ Waiting 15 seconds to avoid rate limit...")
+        time.sleep(15)
 
         return message.content[0].text.strip()
 
