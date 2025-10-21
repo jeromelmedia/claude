@@ -40,8 +40,9 @@ class VideoGenerationMacro:
         self.claude_client = anthropic.Anthropic(api_key=self.config['anthropic_api_key'])
         self.project_id = self.config['claude_project_id']
         self.voice_id = self.config['voice_id']
-        # Use configured model or default to claude-3-5-sonnet-20240620
-        self.model = self.config.get('claude_model', 'claude-3-5-sonnet-20240620')
+        # Use configured model or default to claude-3-sonnet-20240229 (most widely available)
+        self.model = self.config.get('claude_model', 'claude-3-sonnet-20240229')
+        print(f"Using Claude model: {self.model}")
         self.working_dir = Path("./output")
         self.working_dir.mkdir(exist_ok=True)
 
@@ -85,15 +86,27 @@ class VideoGenerationMacro:
         while True:
             print("\nGenerating title...")
 
-            message = self.claude_client.messages.create(
-                model=self.model,
-                max_tokens=500,
-                messages=[{
-                    "role": "user",
-                    "content": "Generate a compelling video title based on your training. Just provide the title, nothing else."
-                }],
-                metadata={"user_id": self.project_id}
-            )
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=500,
+                    messages=[{
+                        "role": "user",
+                        "content": "Generate a compelling video title based on your training. Just provide the title, nothing else."
+                    }],
+                    metadata={"user_id": self.project_id}
+                )
+            except anthropic.NotFoundError as e:
+                print(f"\n✗ ERROR: Model '{self.model}' not found or not accessible")
+                print("\nYour API key doesn't have access to this model.")
+                print("\nAvailable models you can try (add 'claude_model' to config.json):")
+                print("  - claude-3-sonnet-20240229 (recommended)")
+                print("  - claude-3-haiku-20240307 (fastest)")
+                print("  - claude-3-opus-20240229 (most capable)")
+                print("  - claude-3-5-sonnet-20241022 (latest)")
+                print("\nTo check your API access, visit:")
+                print("  https://console.anthropic.com/settings/keys")
+                raise
 
             title = message.content[0].text.strip()
             print(f"\nGenerated Title: {title}")
