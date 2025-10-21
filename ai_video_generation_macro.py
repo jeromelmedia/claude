@@ -294,69 +294,120 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         """Generate voiceover using genaipro.vn."""
         print("\n=== STEP 5: Generating Voiceover ===")
 
-        # Setup Chrome driver
-        chrome_options = Options()
-        if self.config.get('chrome_profile_path'):
-            chrome_options.add_argument(f"user-data-dir={self.config['chrome_profile_path']}")
+        # Check if manual voiceover already exists
+        manual_voiceover = self.working_dir / "voiceover.mp3"
+        if manual_voiceover.exists():
+            print(f"✓ Found existing voiceover at: {manual_voiceover}")
+            use_existing = input("Use this existing voiceover? [y/n]: ").lower()
+            if use_existing == 'y':
+                return str(manual_voiceover)
 
-        driver = webdriver.Chrome(options=chrome_options)
+        print("\nAttempting automated voiceover generation...")
+        print("Note: This may fail due to network issues or site changes.")
 
         try:
-            # Navigate to genaipro.vn
-            driver.get("https://genaipro.vn")
-            time.sleep(3)
+            # Setup Chrome driver
+            chrome_options = Options()
+            if self.config.get('chrome_profile_path'):
+                chrome_options.add_argument(f"user-data-dir={self.config['chrome_profile_path']}")
 
-            # Find text input and paste script
-            print("Entering script into voiceover generator...")
-            text_input = WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "textarea, [contenteditable='true']"))
-            )
-            text_input.clear()
-            text_input.send_keys(korean_script)
+            driver = webdriver.Chrome(options=chrome_options)
 
-            # Select voice
-            print(f"Selecting voice ID: {self.voice_id}")
-            # This will need to be customized based on the actual website structure
-            voice_selector = driver.find_element(By.ID, "voice-selector")  # Adjust selector
-            voice_selector.click()
-            time.sleep(1)
+            try:
+                # Navigate to genaipro.vn
+                print("Connecting to genaipro.vn...")
+                driver.get("https://genaipro.vn")
+                time.sleep(3)
 
-            voice_option = driver.find_element(By.XPATH, f"//option[@value='{self.voice_id}']")
-            voice_option.click()
+                # Find text input and paste script
+                print("Entering script into voiceover generator...")
+                text_input = WebDriverWait(driver, 10).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, "textarea, [contenteditable='true']"))
+                )
+                text_input.clear()
+                text_input.send_keys(korean_script)
 
-            # Generate voiceover
-            print("Generating voiceover...")
-            generate_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Generate') or contains(text(), 'Tạo')]")
-            generate_button.click()
+                # Select voice
+                print(f"Selecting voice ID: {self.voice_id}")
+                # This will need to be customized based on the actual website structure
+                voice_selector = driver.find_element(By.ID, "voice-selector")  # Adjust selector
+                voice_selector.click()
+                time.sleep(1)
 
-            # Wait for generation to complete
-            print("Waiting for voiceover generation to complete...")
-            time.sleep(30)  # Adjust based on typical generation time
+                voice_option = driver.find_element(By.XPATH, f"//option[@value='{self.voice_id}']")
+                voice_option.click()
 
-            # Download voiceover
-            print("Downloading voiceover...")
-            download_button = WebDriverWait(driver, 120).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download') or contains(text(), 'Tải')]"))
-            )
-            download_button.click()
+                # Generate voiceover
+                print("Generating voiceover...")
+                generate_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Generate') or contains(text(), 'Tạo')]")
+                generate_button.click()
 
-            time.sleep(10)  # Wait for download
+                # Wait for generation to complete
+                print("Waiting for voiceover generation to complete...")
+                time.sleep(30)  # Adjust based on typical generation time
 
-            # Find the downloaded file (assumes it goes to default downloads folder)
-            downloads_path = Path.home() / "Downloads"
-            voiceover_files = sorted(downloads_path.glob("*.mp3"), key=lambda x: x.stat().st_mtime, reverse=True)
+                # Download voiceover
+                print("Downloading voiceover...")
+                download_button = WebDriverWait(driver, 120).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download') or contains(text(), 'Tải')]"))
+                )
+                download_button.click()
 
-            if voiceover_files:
-                latest_voiceover = voiceover_files[0]
-                voiceover_path = self.working_dir / "voiceover.mp3"
-                latest_voiceover.rename(voiceover_path)
-                print(f"✓ Voiceover saved to: {voiceover_path}")
-                return str(voiceover_path)
+                time.sleep(10)  # Wait for download
+
+                # Find the downloaded file (assumes it goes to default downloads folder)
+                downloads_path = Path.home() / "Downloads"
+                voiceover_files = sorted(downloads_path.glob("*.mp3"), key=lambda x: x.stat().st_mtime, reverse=True)
+
+                if voiceover_files:
+                    latest_voiceover = voiceover_files[0]
+                    voiceover_path = self.working_dir / "voiceover.mp3"
+                    latest_voiceover.rename(voiceover_path)
+                    print(f"✓ Voiceover saved to: {voiceover_path}")
+                    return str(voiceover_path)
+                else:
+                    raise Exception("Could not find downloaded voiceover file")
+
+            finally:
+                driver.quit()
+
+        except Exception as e:
+            print(f"\n✗ Automated voiceover generation failed: {e}")
+            print("\n" + "=" * 60)
+            print("MANUAL VOICEOVER GENERATION REQUIRED")
+            print("=" * 60)
+            print("\nThe Korean script has been saved to:")
+            print(f"  {self.working_dir / 'video_script_korean.txt'}")
+            print("\nPlease manually generate the voiceover:")
+            print("1. Go to https://genaipro.vn (or your preferred TTS service)")
+            print("2. Copy the Korean script from the file above")
+            print("3. Select your voice and generate the voiceover")
+            print("4. Download the voiceover as MP3")
+            print(f"5. Save it as: {self.working_dir / 'voiceover.mp3'}")
+            print("\nAlternative TTS services:")
+            print("  - elevenlabs.io")
+            print("  - play.ht")
+            print("  - murf.ai")
+            print("  - Google Cloud Text-to-Speech")
+            print("\n" + "=" * 60)
+
+            choice = input("\nOptions:\n  [w] Wait, I'll do it manually now\n  [s] Skip voiceover and continue\n  [q] Quit\nChoice: ").lower()
+
+            if choice == 'w':
+                input(f"\nPress Enter after you've saved the voiceover to: {manual_voiceover}")
+                if manual_voiceover.exists():
+                    print(f"✓ Voiceover found at: {manual_voiceover}")
+                    return str(manual_voiceover)
+                else:
+                    print(f"✗ Voiceover not found at: {manual_voiceover}")
+                    print("Continuing without voiceover...")
+                    return None
+            elif choice == 's':
+                print("Skipping voiceover generation...")
+                return None
             else:
-                raise Exception("Could not find downloaded voiceover file")
-
-        finally:
-            driver.quit()
+                print("Exiting...")
+                sys.exit(0)
 
     def get_audio_duration(self, audio_path: str) -> float:
         """Get duration of audio file in seconds."""
@@ -432,7 +483,7 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         return image_paths
 
-    def edit_video_capcut(self, voiceover_path: str, image_paths: List[str]) -> str:
+    def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str]) -> str:
         """Edit video using CapCut (automation via PyAutoGUI)."""
         print("\n=== STEP 7: Editing Video in CapCut ===")
         print("Note: This requires CapCut to be installed and this will automate the GUI.")
@@ -440,8 +491,12 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         input("Press Enter when ready to start CapCut automation...")
 
         # Get audio duration
-        audio_duration = self.get_audio_duration(voiceover_path)
-        print(f"Voiceover duration: {audio_duration:.2f} seconds")
+        if voiceover_path:
+            audio_duration = self.get_audio_duration(voiceover_path)
+            print(f"Voiceover duration: {audio_duration:.2f} seconds")
+        else:
+            audio_duration = 300  # Default 5 minutes if no voiceover
+            print("No voiceover - using default 5 minute duration")
 
         # Launch CapCut
         print("Launching CapCut...")
@@ -476,12 +531,17 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         print("3. Loop it for 1.5 minutes (90 seconds)")
         print(f"4. At 1.5 min mark, add images from: {self.working_dir}")
         print(f"5. Display each image for {(audio_duration - 90) / len(image_paths):.1f} seconds")
-        print(f"6. Import voiceover: {voiceover_path}")
-        print("7. Add voiceover to audio track")
-        print("8. Export as MP4")
+
+        if voiceover_path:
+            print(f"6. Import voiceover: {voiceover_path}")
+            print("7. Add voiceover to audio track")
+            print("8. Export as MP4")
+        else:
+            print("6. (No voiceover - skip audio track)")
+            print("7. Export as MP4")
 
         export_path = self.working_dir / "final_video.mp4"
-        print(f"\n9. Save exported video to: {export_path}")
+        print(f"\n{'8' if voiceover_path else '7'}. Save exported video to: {export_path}")
 
         input("\nPress Enter when you've completed the video editing and export...")
 
