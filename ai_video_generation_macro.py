@@ -794,34 +794,40 @@ PREMISE: [Korean translation]"""
             return 300.0
 
     def generate_images(self, title: str, premise: str, num_images: int = 4) -> List[str]:
-        """Generate images using pollinations.ai."""
+        """Generate images using pollinations.ai.
+
+        Images will be 1920x1080 (widescreen landscape) and show the same person
+        from different camera angles as specified in the config.
+        """
         print(f"\n=== STEP 6: Generating {num_images} Images ===")
 
-        # Generate prompt for the person in the images
-        message = self.claude_client.messages.create(
-            model=self.model,
-            max_tokens=300,
-            messages=[{
-                "role": "user",
-                "content": f"Based on this video title '{title}' and premise '{premise}', describe the person who is presenting this video in 1-2 sentences. Focus on their appearance and setting."
-            }]
-        )
+        # Get person description from config
+        person_description = self.config.get('person_description', 'professional presenter in business casual attire')
+        print(f"Person description (from config): {person_description}")
 
-        person_description = message.content[0].text.strip()
-        print(f"Person description: {person_description}")
+        # Define different camera angles/shots for variety
+        shot_types = [
+            "wide shot, full body visible",
+            "close-up shot, focusing on face and upper body",
+            "side angle shot, 45 degree perspective",
+            "over-the-shoulder shot, dynamic angle"
+        ]
 
         image_paths = []
 
         for i in range(num_images):
             print(f"\nGenerating image {i+1}/{num_images}...")
 
-            # Create varied prompts for each image
-            prompt = f"{person_description}, professional portrait, high quality, variation {i+1}"
+            # Create varied prompts with different camera angles
+            shot_description = shot_types[i] if i < len(shot_types) else f"variation {i+1}"
+            prompt = f"{person_description}, {shot_description}, professional lighting, high quality, cinematic"
 
-            # Use pollinations.ai API
-            image_url = f"https://image.pollinations.ai/prompt/{requests.utils.quote(prompt)}"
+            # Use pollinations.ai API with 1920x1080 dimensions
+            encoded_prompt = requests.utils.quote(prompt)
+            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1920&height=1080"
 
-            print(f"Downloading image from: {image_url}")
+            print(f"Shot type: {shot_description}")
+            print(f"Downloading image from pollinations.ai...")
             response = requests.get(image_url, timeout=60)
 
             if response.status_code == 200:
@@ -829,7 +835,7 @@ PREMISE: [Korean translation]"""
                 with open(image_path, 'wb') as f:
                     f.write(response.content)
                 image_paths.append(str(image_path))
-                print(f"✓ Image {i+1} saved to: {image_path}")
+                print(f"✓ Image {i+1} saved to: {image_path} (1920x1080)")
             else:
                 print(f"✗ Failed to download image {i+1}")
 
@@ -837,10 +843,97 @@ PREMISE: [Korean translation]"""
 
         return image_paths
 
+    def replay_capcut_actions(self, actions_path: Path) -> None:
+        """Replay recorded CapCut actions from JSON file."""
+        print("\n🎬 Replaying recorded CapCut actions...")
+
+        with open(actions_path, 'r') as f:
+            recording_data = json.load(f)
+
+        actions = recording_data.get('actions', [])
+        total_actions = len(actions)
+
+        print(f"✓ Loaded {total_actions} recorded actions")
+        print(f"Recording date: {recording_data.get('recorded_at', 'unknown')}")
+        print("\n⚠ DO NOT TOUCH YOUR MOUSE OR KEYBOARD! ⚠")
+        print("Starting playback in 5 seconds...\n")
+        time.sleep(5)
+
+        for i, action in enumerate(actions, 1):
+            # Wait for the recorded delay before this action
+            delay = action.get('delay_before', 0)
+            if delay > 0:
+                time.sleep(delay)
+
+            action_type = action.get('type')
+
+            if action_type == 'click':
+                x = action.get('x')
+                y = action.get('y')
+                print(f"[{i}/{total_actions}] Click at ({x}, {y})")
+                pyautogui.click(x, y)
+
+            elif action_type == 'key':
+                key = action.get('key')
+                print(f"[{i}/{total_actions}] Press key: {key}")
+                pyautogui.press(key)
+
+            elif action_type == 'special_key':
+                key = action.get('key')
+                print(f"[{i}/{total_actions}] Press special key: {key}")
+                pyautogui.press(key)
+
+        print("\n✓ Finished replaying all actions!")
+
     def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
-        """Edit video using CapCut with FULL automation via PyAutoGUI."""
-        print("\n=== STEP 8: Editing Video in CapCut (FULLY AUTOMATED) ===")
-        print("Note: This will automatically control CapCut using your mouse/keyboard.")
+        """Edit video using CapCut with automation.
+
+        If capcut_actions.json exists, it will replay those recorded actions.
+        Otherwise, it will attempt automatic automation (which may not work perfectly).
+
+        To record your own actions:
+        1. Run: python capcut_recorder.py
+        2. Press 's' to start recording
+        3. Perform your complete CapCut workflow
+        4. Press 'q' to save
+        5. The macro will automatically use the recording next time
+        """
+        print("\n=== STEP 8: Editing Video in CapCut ===")
+
+        # Check if we have recorded actions to replay
+        actions_path = Path(__file__).parent / "capcut_actions.json"
+
+        if actions_path.exists():
+            print("✓ Found recorded CapCut actions - will replay them!")
+            self.replay_capcut_actions(actions_path)
+
+            # Wait for export to complete
+            print("\nWaiting for video export to complete...")
+            print("(Checking for final_video.mp4 in output folder)")
+
+            export_path = self.working_dir / "final_video.mp4"
+            max_wait = 600  # 10 minutes
+            waited = 0
+
+            while waited < max_wait:
+                if export_path.exists() and export_path.stat().st_size > 1000:
+                    print(f"✓ Video exported successfully: {export_path}")
+                    return str(export_path)
+
+                time.sleep(5)
+                waited += 5
+
+                if waited % 30 == 0:
+                    print(f"  Still waiting... ({waited}/{max_wait} seconds)")
+
+            print("⚠ Export timeout - please check CapCut manually")
+            return str(export_path)
+
+        # Otherwise, fall back to automatic automation (may not work)
+        print("⚠ No recorded actions found (capcut_actions.json)")
+        print("⚠ Attempting automatic automation, but this may not work correctly")
+        print("⚠ For best results, run: python capcut_recorder.py to record your actions")
+        print("\nNote: This will automatically control CapCut using your mouse/keyboard.")
         print("⚠ DO NOT TOUCH YOUR MOUSE OR KEYBOARD! ⚠")
         print("Starting in 5 seconds...")
         time.sleep(5)

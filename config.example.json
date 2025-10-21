@@ -18,6 +18,9 @@
   "_comment_tts_volume": "Volume (0-10, default: 1.0)",
 
   "video_clip_path": "./talking_person.mp4",
+  "person_description": "young asian woman with long black hair, wearing a white blouse, professional presenter",
+  "_comment_person": "Describe the person in your talking_person.mp4 video. Used to generate consistent images with different camera angles. Be specific about appearance, clothing, and style.",
+
   "capcut_path": "C:/Users/alexh/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/CapCut/CapCut.lnk",
   "_comment_capcut": "Path to CapCut shortcut or executable. For Windows, use forward slashes OR double backslashes",
 
