@@ -1,7 +1,10 @@
 anthropic>=0.18.0
 selenium>=4.15.0
 pyautogui>=0.9.54
-pydub>=0.25.1
 requests>=2.31.0
 pillow>=10.0.0
 webdriver-manager>=4.0.0
+
+# Optional - pydub doesn't work on Python 3.13+ (audioop removed)
+# The script will use ffprobe instead if pydub is not available
+# pydub>=0.25.1

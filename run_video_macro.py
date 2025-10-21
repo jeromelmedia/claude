@@ -40,21 +40,31 @@ def main():
 
     print(f"✓ Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
 
+    # Warn about Python 3.13+ compatibility
+    if sys.version_info >= (3, 13):
+        print("⚠ Note: Python 3.13+ detected. pydub is not compatible.")
+        print("  Audio duration will be detected using ffprobe instead.")
+        print("  Please ensure FFmpeg is installed.")
+
     # Required packages
-    packages = [
+    required_packages = [
         ("anthropic", "anthropic"),
         ("selenium", "selenium"),
         ("requests", "requests"),
         ("pillow", "PIL"),
-        ("pydub", "pydub"),
         ("pyautogui", "pyautogui"),
         ("webdriver-manager", "webdriver_manager"),
     ]
 
+    # Optional packages (only for Python < 3.13)
+    optional_packages = []
+    if sys.version_info < (3, 13):
+        optional_packages = [("pydub", "pydub")]
+
     print("\nChecking dependencies...")
     all_installed = True
 
-    for package, import_name in packages:
+    for package, import_name in required_packages:
         try:
             __import__(import_name)
             print(f"✓ {package}")
@@ -63,9 +73,18 @@ def main():
             if not check_and_install_package(package, import_name):
                 all_installed = False
 
+    # Try to install optional packages but don't fail if they don't work
+    for package, import_name in optional_packages:
+        try:
+            __import__(import_name)
+            print(f"✓ {package}")
+        except ImportError:
+            print(f"⚠ {package} not found, installing...")
+            check_and_install_package(package, import_name)  # Don't fail if this doesn't work
+
     if not all_installed:
-        print("\n✗ Some packages failed to install. Please run manually:")
-        print(f"  {sys.executable} -m pip install anthropic selenium requests pillow pydub pyautogui webdriver-manager")
+        print("\n✗ Some required packages failed to install. Please run manually:")
+        print(f"  {sys.executable} -m pip install anthropic selenium requests pillow pyautogui webdriver-manager")
         sys.exit(1)
 
     print("\n✓ All dependencies installed!")

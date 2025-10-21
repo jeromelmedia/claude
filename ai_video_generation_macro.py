@@ -10,6 +10,7 @@ import sys
 import time
 import json
 import requests
+import subprocess
 from pathlib import Path
 from typing import Optional, List, Dict
 import anthropic
@@ -20,7 +21,14 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 import pyautogui
-from pydub import AudioSegment
+
+# Optional imports for audio handling
+try:
+    from pydub import AudioSegment
+    PYDUB_AVAILABLE = True
+except ImportError:
+    PYDUB_AVAILABLE = False
+    print("Note: pydub not available, will use ffprobe for audio duration")
 
 
 class VideoGenerationMacro:
@@ -324,8 +332,33 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
     def get_audio_duration(self, audio_path: str) -> float:
         """Get duration of audio file in seconds."""
-        audio = AudioSegment.from_mp3(audio_path)
-        return len(audio) / 1000.0  # Convert milliseconds to seconds
+        # Try using pydub first (if available and working)
+        if PYDUB_AVAILABLE:
+            try:
+                audio = AudioSegment.from_mp3(audio_path)
+                return len(audio) / 1000.0  # Convert milliseconds to seconds
+            except Exception as e:
+                print(f"pydub failed: {e}, trying ffprobe...")
+
+        # Fall back to ffprobe
+        try:
+            cmd = [
+                'ffprobe',
+                '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                str(audio_path)
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            duration = float(result.stdout.strip())
+            return duration
+        except subprocess.CalledProcessError:
+            print("Warning: Could not get audio duration. Using default 300 seconds (5 minutes)")
+            return 300.0  # Default fallback
+        except FileNotFoundError:
+            print("Warning: ffprobe not found. Please install FFmpeg.")
+            print("Using default duration of 300 seconds (5 minutes)")
+            return 300.0
 
     def generate_images(self, title: str, premise: str, num_images: int = 4) -> List[str]:
         """Generate images using pollinations.ai."""
