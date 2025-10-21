@@ -121,12 +121,30 @@ class VideoGenerationMacro:
             print(f"Created default config at {config_path}. Please fill in your details.")
             sys.exit(1)
 
-    def generate_title(self) -> str:
-        """Generate a video title using Claude with approval loop."""
-        print("\n=== STEP 1: Generating Video Title ===")
+    def translate_to_korean_simple(self, text: str, label: str = "text") -> str:
+        """Translate a short text to Korean."""
+        print(f"\nTranslating {label} to Korean...")
 
+        message = self.claude_client.messages.create(
+            model=self.model,
+            max_tokens=1000,
+            messages=[{
+                "role": "user",
+                "content": f"Translate the following {label} to Korean. Maintain the tone and style:\n\n{text}"
+            }]
+        )
+
+        translation = message.content[0].text.strip()
+        print(f"Korean {label}: {translation}")
+        return translation
+
+    def generate_title(self) -> tuple:
+        """Generate a video title in English, get approval, then translate to Korean. Returns (english_title, korean_title)."""
+        print("\n=== STEP 1: Generating Video Title (English) ===")
+
+        english_title = None
         while True:
-            print("\nGenerating title...")
+            print("\nGenerating English title...")
 
             try:
                 message = self.claude_client.messages.create(
@@ -135,7 +153,7 @@ class VideoGenerationMacro:
                     system=self.custom_instructions,
                     messages=[{
                         "role": "user",
-                        "content": "Generate a compelling video title in the style and topic you've been trained on in this project. Just provide the title, nothing else."
+                        "content": "Generate a compelling video title in English in the style and topic you've been trained on in this project. Just provide the title, nothing else."
                     }]
                 )
             except anthropic.NotFoundError as e:
@@ -150,27 +168,67 @@ class VideoGenerationMacro:
                 print("  https://console.anthropic.com/settings/keys")
                 raise
 
-            title = message.content[0].text.strip()
-            print(f"\nGenerated Title: {title}")
+            english_title = message.content[0].text.strip()
+            print(f"\nGenerated English Title: {english_title}")
 
             response = input("\nOptions: [a]pprove, [t]weak, [d]eny (regenerate): ").lower()
 
             if response == 'a':
-                print(f"✓ Title approved: {title}")
-                return title
+                print(f"✓ English title approved: {english_title}")
+                break
             elif response == 't':
-                tweak = input("Enter your tweaked version: ")
-                print(f"✓ Using tweaked title: {tweak}")
-                return tweak
+                tweak = input("Enter your tweaked English title: ")
+                english_title = tweak
+                print(f"✓ Using tweaked title: {english_title}")
+                break
             elif response == 'd':
                 print("Regenerating title...")
                 continue
             else:
                 print("Invalid input. Please try again.")
 
-    def generate_premise(self, title: str) -> str:
-        """Generate a 2-3 sentence premise for the video."""
-        print("\n=== STEP 2: Generating Video Premise ===")
+        # Translate to Korean
+        korean_title = self.translate_to_korean_simple(english_title, "title")
+
+        return english_title, korean_title
+
+    def generate_description(self, english_title: str) -> tuple:
+        """Generate video description based on description files. Returns (english_description, korean_description)."""
+        print("\n=== STEP 2: Generating Video Description (English) ===")
+
+        message = self.claude_client.messages.create(
+            model=self.model,
+            max_tokens=800,
+            system=self.custom_instructions,
+            messages=[{
+                "role": "user",
+                "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate."
+            }]
+        )
+
+        english_description = message.content[0].text.strip()
+        print(f"\nGenerated English Description:\n{english_description}")
+
+        response = input("\nApprove this description? [y/n]: ").lower()
+
+        if response != 'y':
+            tweak = input("Enter your version (or press Enter to regenerate): ")
+            if tweak:
+                english_description = tweak
+                print(f"✓ Using your description")
+            else:
+                return self.generate_description(english_title)  # Regenerate
+
+        print(f"✓ Description approved")
+
+        # Translate to Korean
+        korean_description = self.translate_to_korean_simple(english_description, "description")
+
+        return english_description, korean_description
+
+    def generate_premise(self, english_title: str) -> tuple:
+        """Generate a 2-3 sentence premise for the video. Returns (english_premise, korean_premise)."""
+        print("\n=== STEP 3: Generating Video Premise (English) ===")
 
         message = self.claude_client.messages.create(
             model=self.model,
@@ -178,13 +236,29 @@ class VideoGenerationMacro:
             system=self.custom_instructions,
             messages=[{
                 "role": "user",
-                "content": f"Write a 2-3 sentence premise/description for a video titled '{title}'. This should explain what the video is about in the style and topic you've been trained on."
+                "content": f"Write a 2-3 sentence premise for a video titled '{english_title}'. This explains what the video will cover and serves as a guide for the full script. Be specific about the key points that will be discussed."
             }]
         )
 
-        premise = message.content[0].text.strip()
-        print(f"\nPremise: {premise}")
-        return premise
+        english_premise = message.content[0].text.strip()
+        print(f"\nGenerated English Premise:\n{english_premise}")
+
+        response = input("\nApprove this premise? [y/n]: ").lower()
+
+        if response != 'y':
+            tweak = input("Enter your version (or press Enter to regenerate): ")
+            if tweak:
+                english_premise = tweak
+                print(f"✓ Using your premise")
+            else:
+                return self.generate_premise(english_title)  # Regenerate
+
+        print(f"✓ Premise approved")
+
+        # Translate to Korean
+        korean_premise = self.translate_to_korean_simple(english_premise, "premise")
+
+        return english_premise, korean_premise
 
     def count_words(self, text: str) -> int:
         """Count words in text."""
@@ -224,9 +298,9 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         return message.content[0].text.strip()
 
-    def generate_full_script(self, title: str, premise: str) -> str:
-        """Generate full video script in segments, ensuring 6000-7000 words."""
-        print("\n=== STEP 3: Generating Full Video Script ===")
+    def generate_full_script(self, english_title: str, english_premise: str) -> tuple:
+        """Generate full video script in English, get approval, then translate to Korean. Returns (english_script, korean_script)."""
+        print("\n=== STEP 4: Generating Full Video Script (English) ===")
         print("Target: 6000-7000 words")
 
         segments = []
@@ -236,7 +310,7 @@ Target words for this segment: approximately {target_words_per_segment} words.
             print(f"\nGenerating segment {i}/{total_segments}...")
 
             previous = segments[-1] if segments else ""
-            segment = self.generate_script_segment(title, premise, i, total_segments, previous)
+            segment = self.generate_script_segment(english_title, english_premise, i, total_segments, previous)
             segments.append(segment)
 
             word_count = self.count_words(segment)
@@ -253,8 +327,8 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
             additional_prompt = f"""The current script has {total_words} words but needs to be 6000-7000 words.
 
-Title: {title}
-Premise: {premise}
+Title: {english_title}
+Premise: {english_premise}
 
 Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target."""
 
@@ -277,23 +351,43 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             full_script = " ".join(words[:7000])
             total_words = 7000
 
-        print(f"\n✓ Final script word count: {total_words} words")
+        print(f"\n✓ Final English script word count: {total_words} words")
 
-        # Save script
-        script_path = self.working_dir / "video_script.txt"
-        with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(f"TITLE: {title}\n\n")
-            f.write(f"PREMISE: {premise}\n\n")
+        # Show preview and get approval
+        print("\n" + "=" * 60)
+        print("SCRIPT PREVIEW (first 500 characters):")
+        print("=" * 60)
+        print(full_script[:500] + "...")
+        print("=" * 60)
+
+        response = input("\nApprove this script? [y/n]: ").lower()
+
+        if response != 'y':
+            print("\n✗ Script not approved. Regenerating...")
+            return self.generate_full_script(english_title, english_premise)
+
+        print(f"✓ English script approved")
+
+        # Save English script
+        english_script_path = self.working_dir / "video_script_english.txt"
+        with open(english_script_path, 'w', encoding='utf-8') as f:
+            f.write(f"TITLE: {english_title}\n\n")
+            f.write(f"PREMISE: {english_premise}\n\n")
             f.write(f"WORD COUNT: {total_words}\n\n")
             f.write("=" * 50 + "\n\n")
             f.write(full_script)
 
-        print(f"✓ Script saved to: {script_path}")
-        return full_script
+        print(f"✓ English script saved to: {english_script_path}")
+
+        # Translate to Korean
+        korean_script = self.translate_to_korean(full_script)
+
+        return full_script, korean_script
 
     def translate_to_korean(self, script: str) -> str:
-        """Translate the script to Korean."""
-        print("\n=== STEP 4: Translating Script to Korean ===")
+        """Translate the full English script to Korean."""
+        print("\n=== Translating Full Script to Korean ===")
+        print("This may take a few minutes...")
 
         # Split script into chunks for translation (API token limits)
         chunks = []
@@ -408,6 +502,56 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
                 print("Exiting...")
                 sys.exit(0)
 
+    def generate_subtitles(self, korean_script: str) -> str:
+        """Generate SRT subtitles from Korean script."""
+        print("\n=== Generating Subtitles (SRT format) ===")
+
+        subtitle_path = self.working_dir / "subtitles.srt"
+
+        print("Creating subtitle file with timed segments...")
+
+        # Split script into sentences
+        sentences = korean_script.replace('! ', '!\n').replace('? ', '?\n').replace('. ', '.\n').split('\n')
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # Estimate timing (average speaking rate: ~2.5 seconds per sentence)
+        srt_content = ""
+        current_time = 0.0
+        duration_per_sentence = 2.5
+
+        for i, sentence in enumerate(sentences, 1):
+            start_time = current_time
+            end_time = current_time + duration_per_sentence
+
+            # Format timestamps
+            start_ts = self._format_srt_timestamp(start_time)
+            end_ts = self._format_srt_timestamp(end_time)
+
+            # Add subtitle entry
+            srt_content += f"{i}\n"
+            srt_content += f"{start_ts} --> {end_ts}\n"
+            srt_content += f"{sentence}\n\n"
+
+            current_time = end_time
+
+        # Save SRT file
+        with open(subtitle_path, 'w', encoding='utf-8') as f:
+            f.write(srt_content)
+
+        print(f"✓ Subtitles saved to: {subtitle_path}")
+        print(f"  Total subtitle entries: {len(sentences)}")
+        print(f"  Estimated duration: {current_time:.1f} seconds")
+
+        return str(subtitle_path)
+
+    def _format_srt_timestamp(self, seconds: float) -> str:
+        """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)."""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = int(seconds % 60)
+        millis = int((seconds % 1) * 1000)
+        return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
     def get_audio_duration(self, audio_path: str) -> float:
         """Get duration of audio file in seconds."""
         # Try using pydub first (if available and working)
@@ -482,9 +626,9 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         return image_paths
 
-    def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str]) -> str:
+    def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
         """Edit video using CapCut (automation via PyAutoGUI)."""
-        print("\n=== STEP 7: Editing Video in CapCut ===")
+        print("\n=== STEP 8: Editing Video in CapCut ===")
         print("Note: This requires CapCut to be installed and this will automate the GUI.")
         print("Please ensure CapCut is closed before continuing.")
         input("Press Enter when ready to start CapCut automation...")
@@ -534,13 +678,17 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         if voiceover_path:
             print(f"6. Import voiceover: {voiceover_path}")
             print("7. Add voiceover to audio track")
-            print("8. Export as MP4")
+            print(f"8. Import subtitles: {subtitle_path}")
+            print("9. Add subtitles to the video (CapCut: Text -> Auto Captions or manually import SRT)")
+            print("10. Export as MP4")
         else:
             print("6. (No voiceover - skip audio track)")
-            print("7. Export as MP4")
+            print(f"7. Import subtitles: {subtitle_path}")
+            print("8. Add subtitles to the video")
+            print("9. Export as MP4")
 
         export_path = self.working_dir / "final_video.mp4"
-        print(f"\n{'8' if voiceover_path else '7'}. Save exported video to: {export_path}")
+        print(f"\n{'10' if voiceover_path else '9'}. Save exported video to: {export_path}")
 
         input("\nPress Enter when you've completed the video editing and export...")
 
@@ -611,37 +759,43 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         print("=" * 60)
 
         try:
-            # Step 1: Generate and approve title
-            title = self.generate_title()
+            # Step 1: Generate and approve title (English → Korean)
+            english_title, korean_title = self.generate_title()
 
-            # Step 2: Generate premise
-            premise = self.generate_premise(title)
+            # Step 2: Generate and approve description (English → Korean)
+            english_description, korean_description = self.generate_description(english_title)
 
-            # Step 3: Generate full script
-            script = self.generate_full_script(title, premise)
+            # Step 3: Generate and approve premise (English → Korean)
+            english_premise, korean_premise = self.generate_premise(english_title)
 
-            # Step 4: Translate to Korean
-            korean_script = self.translate_to_korean(script)
+            # Step 4: Generate and approve full script (English → Korean)
+            english_script, korean_script = self.generate_full_script(english_title, english_premise)
 
-            # Step 5: Generate voiceover
+            # Step 5: Generate voiceover from Korean script
             voiceover_path = self.generate_voiceover(korean_script)
 
-            # Step 6: Generate images
-            image_paths = self.generate_images(title, premise)
+            # Step 6: Generate subtitles from Korean script
+            subtitle_path = self.generate_subtitles(korean_script)
 
-            # Step 7: Edit video in CapCut
-            video_path = self.edit_video_capcut(voiceover_path, image_paths)
+            # Step 7: Generate images
+            image_paths = self.generate_images(english_title, english_premise)
 
-            # Step 8: Create thumbnail in Canva
-            thumbnail_path = self.create_thumbnail_canva(title)
+            # Step 8: Edit video in CapCut
+            video_path = self.edit_video_capcut(voiceover_path, image_paths, subtitle_path)
+
+            # Step 9: Create thumbnail in Canva
+            thumbnail_path = self.create_thumbnail_canva(english_title)
 
             print("\n" + "=" * 60)
             print("✓ VIDEO GENERATION COMPLETE!")
             print("=" * 60)
-            print(f"\nTitle: {title}")
+            print(f"\nEnglish Title: {english_title}")
+            print(f"Korean Title: {korean_title}")
+            print(f"Description: {english_description}")
             print(f"Video: {video_path}")
             print(f"Thumbnail: {thumbnail_path}")
-            print(f"All files are in: {self.working_dir}")
+            print(f"Subtitles: {subtitle_path}")
+            print(f"\nAll files are in: {self.working_dir}")
 
         except Exception as e:
             print(f"\n✗ Error occurred: {e}")
