@@ -158,8 +158,8 @@ class VideoGenerationMacro:
                 else:
                     raise  # Re-raise if not a rate limit error or max retries exceeded
 
-    def generate_title(self) -> tuple:
-        """Generate a video title in English, get approval, then translate to Korean. Returns (english_title, korean_title)."""
+    def generate_title(self) -> str:
+        """Generate a video title in English and get approval. Returns english_title."""
         print("\n=== STEP 1: Generating Video Title (English) ===")
 
         english_title = None
@@ -207,16 +207,10 @@ class VideoGenerationMacro:
             else:
                 print("Invalid input. Please try again.")
 
-        # Translate to Korean
-        korean_title = self.translate_to_korean_simple(english_title, "title")
+        return english_title
 
-        # Small delay to avoid rate limiting
-        time.sleep(2)
-
-        return english_title, korean_title
-
-    def generate_description(self, english_title: str) -> tuple:
-        """Generate video description based on description files. Returns (english_description, korean_description)."""
+    def generate_description(self, english_title: str) -> str:
+        """Generate video description based on description files. Returns english_description."""
         print("\n=== STEP 2: Generating Video Description (English) ===")
 
         max_retries = 3
@@ -255,16 +249,10 @@ class VideoGenerationMacro:
 
         print(f"✓ Description approved")
 
-        # Translate to Korean
-        korean_description = self.translate_to_korean_simple(english_description, "description")
+        return english_description
 
-        # Small delay to avoid rate limiting
-        time.sleep(2)
-
-        return english_description, korean_description
-
-    def generate_premise(self, english_title: str) -> tuple:
-        """Generate a 2-3 sentence premise for the video. Returns (english_premise, korean_premise)."""
+    def generate_premise(self, english_title: str) -> str:
+        """Generate a 2-3 sentence premise for the video. Returns english_premise."""
         print("\n=== STEP 3: Generating Video Premise (English) ===")
 
         message = self.claude_client.messages.create(
@@ -292,10 +280,7 @@ class VideoGenerationMacro:
 
         print(f"✓ Premise approved")
 
-        # Translate to Korean
-        korean_premise = self.translate_to_korean_simple(english_premise, "premise")
-
-        return english_premise, korean_premise
+        return english_premise
 
     def count_words(self, text: str) -> int:
         """Count words in text."""
@@ -335,8 +320,8 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         return message.content[0].text.strip()
 
-    def generate_full_script(self, english_title: str, english_premise: str) -> tuple:
-        """Generate full video script in English, get approval, then translate to Korean. Returns (english_script, korean_script)."""
+    def generate_full_script(self, english_title: str, english_premise: str) -> str:
+        """Generate full video script in English and get approval. Returns english_script."""
         print("\n=== STEP 4: Generating Full Video Script (English) ===")
         print("Target: 6000-7000 words")
 
@@ -416,10 +401,102 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         print(f"✓ English script saved to: {english_script_path}")
 
-        # Translate to Korean
-        korean_script = self.translate_to_korean(full_script)
+        return full_script
 
-        return full_script, korean_script
+    def translate_all_content(self, english_title: str, english_description: str,
+                              english_premise: str, english_script: str) -> dict:
+        """Translate all English content to Korean in one batch operation.
+
+        Returns dict with keys: korean_title, korean_description, korean_premise, korean_script
+        """
+        print("\n" + "=" * 60)
+        print("=== TRANSLATING ALL CONTENT TO KOREAN ===")
+        print("=" * 60)
+        print("\nNow that all English content is approved, translating everything to Korean...")
+        print("This will take a few minutes.\n")
+
+        # Step 1: Translate short content (title + description + premise) in one call for consistency
+        print("Step 1/2: Translating title, description, and premise...")
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=2000,
+                    messages=[{
+                        "role": "user",
+                        "content": f"""Translate the following to Korean, maintaining consistent terminology across all three:
+
+TITLE:
+{english_title}
+
+DESCRIPTION:
+{english_description}
+
+PREMISE:
+{english_premise}
+
+Format your response exactly as:
+TITLE: [Korean translation]
+DESCRIPTION: [Korean translation]
+PREMISE: [Korean translation]"""
+                    }]
+                )
+                break
+            except Exception as e:
+                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                    delay = 5 * (2 ** attempt)
+                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry...")
+                    time.sleep(delay)
+                else:
+                    raise
+
+        # Parse the response
+        response_text = message.content[0].text.strip()
+        lines = response_text.split('\n')
+
+        korean_title = ""
+        korean_description = ""
+        korean_premise = ""
+
+        current_section = None
+        for line in lines:
+            if line.startswith("TITLE:"):
+                korean_title = line.replace("TITLE:", "").strip()
+                current_section = "title"
+            elif line.startswith("DESCRIPTION:"):
+                korean_description = line.replace("DESCRIPTION:", "").strip()
+                current_section = "description"
+            elif line.startswith("PREMISE:"):
+                korean_premise = line.replace("PREMISE:", "").strip()
+                current_section = "premise"
+            elif line.strip() and current_section:
+                # Multi-line content
+                if current_section == "title":
+                    korean_title += " " + line.strip()
+                elif current_section == "description":
+                    korean_description += " " + line.strip()
+                elif current_section == "premise":
+                    korean_premise += " " + line.strip()
+
+        print(f"✓ Korean title: {korean_title}")
+        print(f"✓ Korean description: {korean_description[:100]}...")
+        print(f"✓ Korean premise: {korean_premise[:100]}...")
+
+        time.sleep(2)  # Small delay
+
+        # Step 2: Translate full script in chunks
+        print("\nStep 2/2: Translating full script...")
+        korean_script = self.translate_to_korean(english_script)
+
+        print("\n✓ All content translated to Korean!")
+
+        return {
+            "korean_title": korean_title,
+            "korean_description": korean_description,
+            "korean_premise": korean_premise,
+            "korean_script": korean_script
+        }
 
     def translate_to_korean(self, script: str) -> str:
         """Translate the full English script to Korean.
@@ -817,17 +894,41 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         print("=" * 60)
 
         try:
-            # Step 1: Generate and approve title (English → Korean)
-            english_title, korean_title = self.generate_title()
+            # PHASE 1: Generate all English content
+            print("\n📝 PHASE 1: GENERATE ALL ENGLISH CONTENT")
+            print("=" * 60)
 
-            # Step 2: Generate and approve description (English → Korean)
-            english_description, korean_description = self.generate_description(english_title)
+            # Step 1: Generate and approve title (English only)
+            english_title = self.generate_title()
 
-            # Step 3: Generate and approve premise (English → Korean)
-            english_premise, korean_premise = self.generate_premise(english_title)
+            # Step 2: Generate and approve description (English only)
+            english_description = self.generate_description(english_title)
 
-            # Step 4: Generate and approve full script (English → Korean)
-            english_script, korean_script = self.generate_full_script(english_title, english_premise)
+            # Step 3: Generate and approve premise (English only)
+            english_premise = self.generate_premise(english_title)
+
+            # Step 4: Generate and approve full script (English only)
+            english_script = self.generate_full_script(english_title, english_premise)
+
+            # PHASE 2: Translate everything to Korean
+            print("\n🌐 PHASE 2: TRANSLATE ALL CONTENT TO KOREAN")
+            print("=" * 60)
+
+            translations = self.translate_all_content(
+                english_title,
+                english_description,
+                english_premise,
+                english_script
+            )
+
+            korean_title = translations["korean_title"]
+            korean_description = translations["korean_description"]
+            korean_premise = translations["korean_premise"]
+            korean_script = translations["korean_script"]
+
+            # PHASE 3: Generate media assets
+            print("\n🎬 PHASE 3: GENERATE MEDIA ASSETS")
+            print("=" * 60)
 
             # Step 5: Generate voiceover from Korean script
             voiceover_path = self.generate_voiceover(korean_script)
@@ -849,7 +950,8 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             print("=" * 60)
             print(f"\nEnglish Title: {english_title}")
             print(f"Korean Title: {korean_title}")
-            print(f"Description: {english_description}")
+            print(f"English Description: {english_description}")
+            print(f"Korean Description: {korean_description}")
             print(f"Video: {video_path}")
             print(f"Thumbnail: {thumbnail_path}")
             print(f"Subtitles: {subtitle_path}")
