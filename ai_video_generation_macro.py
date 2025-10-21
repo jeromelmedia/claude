@@ -40,6 +40,8 @@ class VideoGenerationMacro:
         self.claude_client = anthropic.Anthropic(api_key=self.config['anthropic_api_key'])
         self.project_id = self.config['claude_project_id']
         self.voice_id = self.config['voice_id']
+        # Use configured model or default to claude-3-5-sonnet-20240620
+        self.model = self.config.get('claude_model', 'claude-3-5-sonnet-20240620')
         self.working_dir = Path("./output")
         self.working_dir.mkdir(exist_ok=True)
 
@@ -84,7 +86,7 @@ class VideoGenerationMacro:
             print("\nGenerating title...")
 
             message = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=500,
                 messages=[{
                     "role": "user",
@@ -116,7 +118,7 @@ class VideoGenerationMacro:
         print("\n=== STEP 2: Generating Video Premise ===")
 
         message = self.claude_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=self.model,
             max_tokens=500,
             messages=[{
                 "role": "user",
@@ -159,7 +161,7 @@ Target words for this segment: approximately {target_words_per_segment} words.
         prompt += f"\n\nWrite approximately {target_words_per_segment} words in your trained writing style."
 
         message = self.claude_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=self.model,
             max_tokens=4096,
             messages=[{"role": "user", "content": prompt}],
             metadata={"user_id": self.project_id}
@@ -202,7 +204,7 @@ Premise: {premise}
 Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target."""
 
             message = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=4096,
                 messages=[{"role": "user", "content": additional_prompt}],
                 metadata={"user_id": self.project_id}
@@ -253,7 +255,7 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             print(f"Translating chunk {i}/{len(chunks)}...")
 
             message = self.claude_client.messages.create(
-                model="claude-3-5-sonnet-20241022",
+                model=self.model,
                 max_tokens=4096,
                 messages=[{
                     "role": "user",
@@ -379,7 +381,7 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         # Generate prompt for the person in the images
         message = self.claude_client.messages.create(
-            model="claude-3-5-sonnet-20241022",
+            model=self.model,
             max_tokens=300,
             messages=[{
                 "role": "user",
