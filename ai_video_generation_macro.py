@@ -1233,6 +1233,31 @@ PREMISE: [Korean translation]"""
         finally:
             driver.quit()
 
+    def play_video(self, video_path: str):
+        """Automatically play/open the final video file.
+
+        Args:
+            video_path: Path to the video file to play
+        """
+        print("\n🎬 Opening video...")
+
+        try:
+            if sys.platform == 'win32':
+                # Windows: use os.startfile
+                os.startfile(video_path)
+                print("✓ Video opened in default player")
+            elif sys.platform == 'darwin':
+                # macOS: use 'open' command
+                subprocess.run(['open', video_path], check=False)
+                print("✓ Video opened in default player")
+            else:
+                # Linux: use 'xdg-open'
+                subprocess.run(['xdg-open', video_path], check=False)
+                print("✓ Video opened in default player")
+        except Exception as e:
+            print(f"⚠ Could not auto-play video: {e}")
+            print(f"Please manually open: {video_path}")
+
     def resume_video(self, resume_folder: Path):
         """Resume video generation from existing folder (skip to FFmpeg).
 
@@ -1290,6 +1315,9 @@ PREMISE: [Korean translation]"""
             print("=" * 60)
             print(f"\nVideo: {video_path}")
             print(f"Output folder: {self.working_dir}")
+
+            # Auto-play the video
+            self.play_video(video_path)
 
         except Exception as e:
             print(f"\n✗ Error occurred: {e}")
@@ -1436,6 +1464,9 @@ PREMISE: [Korean translation]"""
             print(f"Subtitles: {subtitle_path}")
             print(f"\nAll files are in: {self.working_dir}")
 
+            # Auto-play the video
+            self.play_video(video_path)
+
         except Exception as e:
             print(f"\n✗ Error occurred: {e}")
             import traceback
@@ -1472,28 +1503,46 @@ PREMISE: [Korean translation]"""
             self.working_dir.mkdir(exist_ok=True)
             print(f"✓ Created output folder: {self.working_dir}\n")
 
-            # Create dummy subtitle file
+            # Check for existing voiceover or create dummy long audio
+            voiceover_path = self.working_dir / "voiceover.mp3"
+            if not voiceover_path.exists():
+                print("🎤 No voiceover found - creating test voiceover (3 minutes)...")
+                print("   (Generating silent audio for testing purposes)\n")
+
+                # Create a 3-minute silent audio file using FFmpeg
+                silent_cmd = [
+                    'ffmpeg', '-y',
+                    '-f', 'lavfi',
+                    '-i', 'anullsrc=channel_layout=stereo:sample_rate=44100',
+                    '-t', '180',  # 3 minutes
+                    '-c:a', 'libmp3lame',
+                    '-b:a', '128k',
+                    str(voiceover_path)
+                ]
+
+                result = subprocess.run(silent_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"⚠ Could not create silent audio: {result.stderr}")
+                    print("Continuing without voiceover...\n")
+                    voiceover_path = None
+                else:
+                    print(f"✓ Created 3-minute test voiceover: {voiceover_path}\n")
+            else:
+                print(f"✓ Found existing voiceover: {voiceover_path}\n")
+
+            # Create dummy subtitle file with more entries for longer video
             print("📝 Creating test subtitle file...")
             subtitle_path = self.working_dir / "subtitles.srt"
             with open(subtitle_path, 'w', encoding='utf-8') as f:
-                f.write("1\n")
-                f.write("00:00:00,000 --> 00:00:05,000\n")
-                f.write("테스트 자막입니다\n")
-                f.write("\n")
-                f.write("2\n")
-                f.write("00:00:05,000 --> 00:00:10,000\n")
-                f.write("FFmpeg 비디오 편집 테스트\n")
-                f.write("\n")
+                # Generate subtitles for 3 minutes
+                for i in range(36):  # 36 entries x 5 seconds = 180 seconds (3 min)
+                    start_sec = i * 5
+                    end_sec = (i + 1) * 5
+                    f.write(f"{i+1}\n")
+                    f.write(f"00:{start_sec//60:02d}:{start_sec%60:02d},000 --> 00:{end_sec//60:02d}:{end_sec%60:02d},000\n")
+                    f.write(f"테스트 자막 {i+1}\n")
+                    f.write("\n")
             print(f"✓ Created test subtitles: {subtitle_path}\n")
-
-            # Check for existing voiceover or create silent audio
-            voiceover_path = self.working_dir / "voiceover.mp3"
-            if not voiceover_path.exists():
-                print("🎤 No voiceover found - video will have no audio")
-                print("   (To test with voiceover, place an MP3 file at the path above)\n")
-                voiceover_path = None
-            else:
-                print(f"✓ Found existing voiceover: {voiceover_path}\n")
 
             # Get random images from character folder
             print("🖼 Loading test images from character folder...")
@@ -1503,7 +1552,7 @@ PREMISE: [Korean translation]"""
 
             # Run FFmpeg video editing
             print("🎬 Starting FFmpeg video editing...\n")
-            video_path = self.edit_video_ffmpeg(voiceover_path, image_paths, str(subtitle_path))
+            video_path = self.edit_video_ffmpeg(str(voiceover_path) if voiceover_path else None, image_paths, str(subtitle_path))
 
             # Success!
             print("\n" + "=" * 60)
@@ -1511,7 +1560,9 @@ PREMISE: [Korean translation]"""
             print("=" * 60)
             print(f"\nVideo created: {video_path}")
             print(f"Output folder: {self.working_dir}")
-            print("\nYou can now check if the video was created correctly!")
+
+            # Auto-play the video
+            self.play_video(video_path)
 
         except Exception as e:
             print(f"\n✗ Error occurred: {e}")
@@ -1587,6 +1638,9 @@ def main():
             print("=" * 60)
             print(f"\nVideo: {video_path}")
             print(f"Folder: {macro.working_dir}")
+
+            # Auto-play the video
+            macro.play_video(video_path)
             return
 
     # Normal mode
