@@ -980,12 +980,11 @@ PREMISE: [Korean translation]"""
     def edit_video_ffmpeg(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
         """Edit video using FFmpeg - reliable command-line video editing.
 
-        Steps:
-        1. Loop the talking person video to match voiceover duration
-        2. Overlay images at different timestamps
-        3. Replace audio with voiceover
-        4. Burn in subtitles from SRT file
-        5. Export as final_video.mp4
+        NEW STRUCTURE:
+        1. Loop talking person video for 90 seconds
+        2. Show 4-5 still images for remaining time (one at a time, equal duration each)
+        3. Add subtitles throughout
+        4. Add voiceover audio
         """
         print("\n=== STEP 8: Editing Video with FFmpeg ===")
 
@@ -995,113 +994,130 @@ PREMISE: [Korean translation]"""
 
         # Get voiceover duration to know how long the final video should be
         if voiceover_path:
-            audio_duration = self.get_audio_duration(voiceover_path)
-            print(f"✓ Voiceover duration: {audio_duration:.2f} seconds")
+            total_duration = self.get_audio_duration(voiceover_path)
+            print(f"✓ Voiceover duration: {total_duration:.2f} seconds")
         else:
-            audio_duration = 90  # Default 90 seconds
+            total_duration = 90  # Default 90 seconds
             print("✓ No voiceover - using 90 second default")
 
         print(f"✓ Input video: {Path(video_path).name}")
-        print(f"✓ Images to overlay: {len(image_paths)}")
+        print(f"✓ Images to show: {len(image_paths)}")
         print(f"✓ Subtitles: {Path(subtitle_path).name}")
         print(f"✓ Output: {output_path}")
 
-        # Build FFmpeg command
+        # Calculate durations
+        video_duration = 90.0  # First 90 seconds is video
+        remaining_duration = max(0, total_duration - video_duration)
+
+        print(f"\n📐 Video structure:")
+        print(f"   0:00 - 1:30 (90s):  Looped talking person video")
+        if remaining_duration > 0:
+            duration_per_image = remaining_duration / len(image_paths)
+            print(f"   1:30 - {int(total_duration//60)}:{int(total_duration%60):02d} ({remaining_duration:.0f}s): Still images ({duration_per_image:.1f}s each)")
+        else:
+            print(f"   Total duration: 90 seconds (no still images)")
+
+        # Build video with FFmpeg
         print("\n🎬 Building video with FFmpeg...")
 
-        # Step 1: Create base video (loop talking person to match audio duration)
-        temp_looped = self.working_dir / "temp_looped.mp4"
-        print("  [1/4] Looping base video to match audio duration...")
+        # Step 1: Create 90-second looped video segment
+        temp_video_90s = self.working_dir / "temp_video_90s.mp4"
+        print("  [1/6] Creating 90-second looped video...")
 
         loop_cmd = [
             'ffmpeg', '-y',
             '-stream_loop', '-1',  # Loop indefinitely
             '-i', str(video_path),
-            '-t', str(audio_duration),  # Cut to exact duration
+            '-t', '90',  # Cut to exactly 90 seconds
             '-c:v', 'libx264',
             '-preset', 'fast',
             '-crf', '23',
-            '-an',  # No audio yet
-            str(temp_looped)
+            '-an',  # No audio
+            str(temp_video_90s)
         ]
 
         result = subprocess.run(loop_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"✗ Error looping video: {result.stderr}")
+            print(f"✗ Error creating 90-second video: {result.stderr}")
             sys.exit(1)
-        print("    ✓ Base video looped")
+        print("    ✓ 90-second video segment created")
 
-        # Step 2: Overlay images at different timestamps
-        temp_with_images = self.working_dir / "temp_with_images.mp4"
-        print(f"  [2/4] Overlaying {len(image_paths)} images...")
-
-        if image_paths:
-            # Each image gets equal time: divide total duration by number of images
-            duration_per_image = audio_duration / len(image_paths)
-            print(f"    Each image will display for {duration_per_image:.1f} seconds")
-
-            # Build inputs: -i base_video -i img1 -i img2 ...
-            overlay_inputs = ['-i', str(temp_looped)]
-            for img_path in image_paths:
-                overlay_inputs.extend(['-i', str(img_path)])
-
-            # Build filter chain for overlays
-            # Images appear sequentially, each taking up equal portion of video
-            filters = []
-            current_input = '0:v'
+        # Step 2: Create video segments from still images (if remaining time > 0)
+        image_segments = []
+        if remaining_duration > 0 and image_paths:
+            duration_per_image = remaining_duration / len(image_paths)
+            print(f"  [2/6] Creating {len(image_paths)} still image segments ({duration_per_image:.1f}s each)...")
 
             for i, img_path in enumerate(image_paths):
-                img_num = i + 1
-                start_time = i * duration_per_image
-                end_time = (i + 1) * duration_per_image
+                img_segment = self.working_dir / f"temp_image_{i}.mp4"
+                image_segments.append(img_segment)
 
-                # Scale image to fit 1/4 of screen (bottom-right corner)
-                scale_filter = f"[{img_num}:v]scale=480:270[img{i}]"
-                filters.append(scale_filter)
+                # Create video segment from still image
+                img_cmd = [
+                    'ffmpeg', '-y',
+                    '-loop', '1',  # Loop the image
+                    '-i', str(img_path),
+                    '-t', str(duration_per_image),  # Duration for this image
+                    '-vf', 'scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2',  # Fit to 1920x1080
+                    '-c:v', 'libx264',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-pix_fmt', 'yuv420p',
+                    '-an',  # No audio
+                    str(img_segment)
+                ]
 
-                # Overlay image for its time slot
-                overlay_filter = f"[{current_input}][img{i}]overlay=W-w-20:H-h-20:enable='between(t,{start_time},{end_time})'[v{i}]"
-                filters.append(overlay_filter)
-                current_input = f"v{i}"
+                result = subprocess.run(img_cmd, capture_output=True, text=True)
+                if result.returncode != 0:
+                    print(f"    ✗ Error creating segment for image {i+1}: {result.stderr}")
+                    # Remove from list if failed
+                    image_segments.pop()
+                else:
+                    print(f"    ✓ Created segment {i+1}/{len(image_paths)}")
 
-                print(f"    Image {i+1}: {start_time:.1f}s - {end_time:.1f}s")
+        # Step 3: Concatenate all segments (90s video + image segments)
+        concat_list = self.working_dir / "concat_list.txt"
+        temp_concatenated = self.working_dir / "temp_concatenated.mp4"
 
-            filter_complex = ';'.join(filters)
+        if image_segments:
+            print(f"  [3/6] Concatenating video + {len(image_segments)} image segments...")
 
-            overlay_cmd = [
-                'ffmpeg', '-y'
-            ] + overlay_inputs + [
-                '-filter_complex', filter_complex,
-                '-map', f'[{current_input}]',
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '23',
-                str(temp_with_images)
+            # Create concat file list
+            with open(concat_list, 'w', encoding='utf-8') as f:
+                f.write(f"file '{temp_video_90s.name}'\n")
+                for img_seg in image_segments:
+                    f.write(f"file '{img_seg.name}'\n")
+
+            # Concatenate using concat demuxer
+            concat_cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', str(concat_list),
+                '-c', 'copy',
+                str(temp_concatenated)
             ]
 
-            result = subprocess.run(overlay_cmd, capture_output=True, text=True)
+            result = subprocess.run(concat_cmd, capture_output=True, text=True)
             if result.returncode != 0:
-                print(f"✗ Error overlaying images: {result.stderr}")
-                # Continue without images
-                temp_with_images = temp_looped
-                print("    ⚠ Continuing without image overlays")
-            else:
-                print(f"    ✓ {len(image_paths)} images overlaid sequentially")
+                print(f"✗ Error concatenating segments: {result.stderr}")
+                sys.exit(1)
+            print("    ✓ All segments concatenated")
         else:
-            # No images, just copy the looped video
-            temp_with_images = temp_looped
-            print("    ⚠ No images to overlay")
+            # No images to add, just use the 90-second video
+            temp_concatenated = temp_video_90s
+            print("  [3/6] No image segments to concatenate, using 90s video only")
 
-        # Step 3: Add subtitles
+        # Step 4: Add subtitles
         temp_with_subs = self.working_dir / "temp_with_subs.mp4"
-        print("  [3/4] Burning in subtitles...")
+        print("  [4/6] Burning in subtitles...")
 
         # Escape subtitle path for FFmpeg filter
         subtitle_path_escaped = str(subtitle_path).replace('\\', '/').replace(':', '\\:')
 
         subs_cmd = [
             'ffmpeg', '-y',
-            '-i', str(temp_with_images),
+            '-i', str(temp_concatenated),
             '-vf', f"subtitles='{subtitle_path_escaped}'",
             '-c:v', 'libx264',
             '-preset', 'fast',
@@ -1113,13 +1129,13 @@ PREMISE: [Korean translation]"""
         if result.returncode != 0:
             print(f"✗ Error adding subtitles: {result.stderr}")
             # Continue without subtitles
-            temp_with_subs = temp_with_images
+            temp_with_subs = temp_concatenated
             print("    ⚠ Continuing without subtitles")
         else:
             print("    ✓ Subtitles burned in")
 
-        # Step 4: Add voiceover audio and export final video
-        print("  [4/4] Adding voiceover and exporting final video...")
+        # Step 5: Add voiceover audio and export final video
+        print("  [5/6] Adding voiceover and exporting final video...")
 
         if voiceover_path:
             final_cmd = [
@@ -1150,15 +1166,16 @@ PREMISE: [Korean translation]"""
 
         print("    ✓ Final video exported")
 
-        # Clean up temp files
-        print("\n🧹 Cleaning up temporary files...")
-        for temp_file in [temp_looped, temp_with_images, temp_with_subs]:
+        # Step 6: Clean up temp files
+        print("  [6/6] Cleaning up temporary files...")
+        temp_files = [temp_video_90s, temp_concatenated, temp_with_subs, concat_list] + image_segments
+        for temp_file in temp_files:
             if temp_file.exists() and temp_file != output_path:
                 temp_file.unlink()
                 print(f"    ✓ Removed {temp_file.name}")
 
         print(f"\n✅ Video editing complete: {output_path}")
-        print(f"   Duration: {audio_duration:.2f} seconds")
+        print(f"   Duration: {total_duration:.2f} seconds")
         print(f"   Size: {output_path.stat().st_size / (1024*1024):.2f} MB")
 
         return str(output_path)
