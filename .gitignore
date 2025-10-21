@@ -1,0 +1,48 @@
+# AI Video Generation Macro - Git Ignore
+
+# Configuration (contains API keys)
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+
+# Output files
+output/
+*.mp4
+*.mp3
+*.jpg
+*.png
+*.txt
+!requirements.txt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Chrome
+*.crx
+
+# Video clips
+talking_person.mp4
