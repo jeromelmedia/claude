@@ -17,12 +17,12 @@
   "tts_volume": 1.0,
   "_comment_tts_volume": "Volume (0-10, default: 1.0)",
 
-  "characters_base_path": "./characters",
+  "characters_base_path": "C:/Users/alexh/OneDrive/Desktop/claude-claude-ai-video-generation-macro-011CULXob98hwyQZ7Ybfmrar/claude-claude-ai-video-generation-macro-011CULXob98hwyQZ7Ybfmrar/Talking people",
   "_comment_characters": "Path to folder containing character subfolders. Each character folder should have: (1) One MP4 video file, (2) Multiple image files (JPG/PNG/WEBP). Example structure:",
-  "_example_structure_1": "characters/talking_person1/talking_person1.mp4",
-  "_example_structure_2": "characters/talking_person1/image1.jpg, image2.png, ...",
-  "_example_structure_3": "characters/talking_person2/talking_person2.mp4",
-  "_example_structure_4": "characters/talking_person2/photo1.jpg, photo2.jpg, ...",
+  "_example_structure_1": "Talking people/talking_person1/talking_person1.mp4",
+  "_example_structure_2": "Talking people/talking_person1/image1.jpg, image2.png, ...",
+  "_example_structure_3": "Talking people/talking_person2/talking_person2.mp4",
+  "_example_structure_4": "Talking people/talking_person2/photo1.jpg, photo2.jpg, ...",
 
   "capcut_path": "C:/Users/alexh/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/CapCut/CapCut.lnk",
   "_comment_capcut": "Path to CapCut shortcut or executable. For Windows, use forward slashes OR double backslashes",
