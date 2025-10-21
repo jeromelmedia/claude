@@ -613,13 +613,8 @@ PREMISE: [Korean translation]"""
         print(f"✓ Korean script saved to: {korean_path}")
         return korean_script
 
-    async def _generate_voiceover_edge_tts(self, korean_script: str, output_path: str, voice: str = "ko-KR-SunHiNeural"):
-        """Internal async function to generate voiceover using edge-tts."""
-        communicate = edge_tts.Communicate(korean_script, voice)
-        await communicate.save(output_path)
-
     def generate_voiceover(self, korean_script: str) -> str:
-        """Generate voiceover using Microsoft Edge TTS (FREE, no API key needed)."""
+        """Generate voiceover using GenAIPro Max API."""
         print("\n=== STEP 5: Generating Voiceover ===")
 
         # Check if manual voiceover already exists
@@ -630,53 +625,115 @@ PREMISE: [Korean translation]"""
             if use_existing == 'y':
                 return str(voiceover_path)
 
-        if not EDGE_TTS_AVAILABLE:
-            print("\n✗ edge-tts not installed!")
-            print("Installing edge-tts...")
-            try:
-                subprocess.check_call([sys.executable, "-m", "pip", "install", "edge-tts", "--user"])
-                print("✓ edge-tts installed! Please run the script again.")
-                sys.exit(0)
-            except:
-                print("✗ Failed to install edge-tts")
-                print("\nPlease install manually:")
-                print("  pip install edge-tts")
-                sys.exit(1)
+        # Get GenAIPro API credentials from config
+        genaipro_api_key = self.config.get('genaipro_api_key')
+        if not genaipro_api_key:
+            print("\n✗ GenAIPro API key not found in config.json!")
+            print("Please add your API key:")
+            print('  "genaipro_api_key": "your-api-key-here"')
+            sys.exit(1)
 
-        # Get voice from config, or use default Korean voice
-        voice_name = self.config.get('tts_voice', 'ko-KR-SunHiNeural')
+        # Get voice ID from config, or use default Korean voice
+        voice_id = self.config.get('genaipro_voice_id', '226893671006272')  # Default Korean voice
 
-        print(f"\nGenerating voiceover with Microsoft Edge TTS...")
-        print(f"Voice: {voice_name}")
+        print(f"\nGenerating voiceover with GenAIPro Max API...")
+        print(f"Voice ID: {voice_id}")
         print(f"Script length: {len(korean_script)} characters")
         print("\nThis may take a few minutes depending on script length...")
 
         try:
-            # Run async function
-            asyncio.run(self._generate_voiceover_edge_tts(
-                korean_script,
-                str(voiceover_path),
-                voice_name
-            ))
+            # Step 1: Create TTS task
+            headers = {
+                "Authorization": f"Bearer {genaipro_api_key}",
+                "Content-Type": "application/json"
+            }
 
-            if voiceover_path.exists():
-                file_size = voiceover_path.stat().st_size / (1024 * 1024)  # MB
-                print(f"\n✓ Voiceover generated successfully!")
-                print(f"  File: {voiceover_path}")
-                print(f"  Size: {file_size:.2f} MB")
-                return str(voiceover_path)
-            else:
-                raise Exception("Voiceover file was not created")
+            create_task_data = {
+                "text": korean_script,
+                "title": "Video Voiceover",
+                "voice_id": voice_id,
+                "model_id": "speech-2.5-hd-preview",
+                "language": "Korean",
+                "speed": self.config.get('tts_speed', 1.0),
+                "pitch": self.config.get('tts_pitch', 0),
+                "volume": self.config.get('tts_volume', 1.0),
+                "is_clone": False
+            }
+
+            print("Creating TTS task...")
+            response = requests.post(
+                "https://genaipro.vn/api/v1/max/tasks",
+                headers=headers,
+                json=create_task_data,
+                timeout=30
+            )
+
+            if response.status_code != 200:
+                raise Exception(f"API error: {response.status_code} - {response.text}")
+
+            task_data = response.json()
+            task_id = task_data['id']
+            print(f"✓ Task created: {task_id}")
+
+            # Step 2: Poll for completion
+            print("Waiting for voiceover generation...")
+            max_attempts = 60  # 5 minutes max (60 × 5 seconds)
+            attempt = 0
+
+            while attempt < max_attempts:
+                time.sleep(5)  # Wait 5 seconds between checks
+
+                response = requests.get(
+                    f"https://genaipro.vn/api/v1/max/tasks/{task_id}",
+                    headers=headers,
+                    timeout=30
+                )
+
+                if response.status_code != 200:
+                    raise Exception(f"API error: {response.status_code} - {response.text}")
+
+                task_status = response.json()
+                status = task_status.get('status')
+                progress = task_status.get('process_percentage', 0)
+
+                print(f"  Progress: {progress}% - Status: {status}")
+
+                if status == 'completed':
+                    result_url = task_status.get('result')
+                    if not result_url:
+                        raise Exception("No result URL in completed task")
+
+                    # Step 3: Download the MP3 file
+                    print(f"\n✓ Voiceover generated! Downloading...")
+                    mp3_response = requests.get(result_url, timeout=60)
+
+                    if mp3_response.status_code == 200:
+                        with open(voiceover_path, 'wb') as f:
+                            f.write(mp3_response.content)
+
+                        file_size = voiceover_path.stat().st_size / (1024 * 1024)  # MB
+                        print(f"✓ Voiceover downloaded successfully!")
+                        print(f"  File: {voiceover_path}")
+                        print(f"  Size: {file_size:.2f} MB")
+                        return str(voiceover_path)
+                    else:
+                        raise Exception(f"Failed to download MP3: {mp3_response.status_code}")
+
+                elif status == 'failed':
+                    error_msg = task_status.get('error', 'Unknown error')
+                    raise Exception(f"Task failed: {error_msg}")
+
+                attempt += 1
+
+            raise Exception("Task timed out after 5 minutes")
 
         except Exception as e:
             print(f"\n✗ Voiceover generation failed: {e}")
             print("\nTroubleshooting:")
-            print("1. Check your internet connection (edge-tts needs to connect to Microsoft servers)")
-            print("2. Try a different voice in config.json:")
-            print("   'tts_voice': 'ko-KR-InJoonNeural' (Male)")
-            print("   'tts_voice': 'ko-KR-SunHiNeural' (Female, default)")
-            print("\n3. To see all available voices, run:")
-            print("   edge-tts --list-voices | grep ko-KR")
+            print("1. Check your GenAIPro API key in config.json")
+            print("2. Check your balance at https://genaipro.vn")
+            print("3. Verify the voice_id is correct")
+            print("4. Check your internet connection")
 
             choice = input("\nOptions:\n  [r] Retry\n  [s] Skip voiceover\n  [q] Quit\nChoice: ").lower()
 
@@ -814,11 +871,20 @@ PREMISE: [Korean translation]"""
         return image_paths
 
     def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
-        """Edit video using CapCut (automation via PyAutoGUI)."""
-        print("\n=== STEP 8: Editing Video in CapCut ===")
-        print("Note: This requires CapCut to be installed and this will automate the GUI.")
-        print("Please ensure CapCut is closed before continuing.")
-        input("Press Enter when ready to start CapCut automation...")
+        """Edit video using CapCut with FULL automation via PyAutoGUI."""
+        print("\n=== STEP 8: Editing Video in CapCut (FULLY AUTOMATED) ===")
+        print("Note: This will automatically control CapCut using your mouse/keyboard.")
+        print("Please do NOT touch your mouse or keyboard during automation!")
+        print("Ensure CapCut is CLOSED before continuing.")
+        input("Press Enter when ready to start FULL automation...")
+
+        # Get screen resolution automatically
+        screen_width, screen_height = pyautogui.size()
+        print(f"✓ Screen resolution detected: {screen_width}x{screen_height}")
+
+        # Calculate coordinates based on screen resolution
+        center_x = screen_width // 2
+        center_y = screen_height // 2
 
         # Get audio duration
         if voiceover_path:
@@ -828,63 +894,171 @@ PREMISE: [Korean translation]"""
             audio_duration = 300  # Default 5 minutes if no voiceover
             print("No voiceover - using default 5 minute duration")
 
+        # Get CapCut path from config
+        capcut_path = self.config.get('capcut_path', 'C:\\Users\\alexh\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\CapCut\\CapCut.lnk')
+
         # Launch CapCut
-        print("Launching CapCut...")
-        if sys.platform == "darwin":  # macOS
-            os.system("open -a CapCut")
-        elif sys.platform == "win32":  # Windows
-            os.system("start CapCut")
-        else:  # Linux
-            print("Please launch CapCut manually and press Enter when ready...")
-            input()
+        print(f"Launching CapCut from: {capcut_path}")
+        try:
+            if sys.platform == "win32":
+                os.startfile(capcut_path)
+            else:
+                subprocess.Popen([capcut_path])
+        except Exception as e:
+            print(f"✗ Failed to launch CapCut: {e}")
+            print("Trying alternative launch method...")
+            if sys.platform == "win32":
+                os.system("start CapCut")
 
-        time.sleep(5)
+        print("Waiting for CapCut to load (10 seconds)...")
+        time.sleep(10)
 
-        # Click "New Project"
-        print("Creating new project...")
-        # These coordinates will need to be adjusted based on screen resolution
-        # This is a template - user will need to adjust
-        pyautogui.click(960, 540)  # Center of screen - adjust as needed
+        # Click "Create Project" button (top center of screen)
+        print("Clicking 'Create Project' button...")
+        create_project_y = int(screen_height * 0.15)  # 15% from top
+        pyautogui.click(center_x, create_project_y)
+        time.sleep(3)
+
+        # Get paths
+        video_clip_path = self.config.get('video_clip_path', './talking_person.mp4')
+
+        print("\n🤖 STARTING FULL CAPCUT AUTOMATION...")
+        print("=" * 60)
+        print("\n⚠ DO NOT TOUCH MOUSE OR KEYBOARD! ⚠\n")
+
+        # Step 1: Import video clip
+        print("Step 1/8: Importing video clip...")
+        pyautogui.hotkey('ctrl', 'i')  # Import shortcut
+        time.sleep(2)
+        pyautogui.write(video_clip_path, interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press('enter')
+        time.sleep(3)
+
+        # Step 2: Drag video to timeline
+        print("Step 2/8: Adding video to timeline...")
+        media_panel_x = int(screen_width * 0.2)  # Left side media panel
+        media_panel_y = int(screen_height * 0.3)
+        timeline_x = int(screen_width * 0.5)
+        timeline_y = int(screen_height * 0.75)  # Timeline at bottom
+
+        pyautogui.click(media_panel_x, media_panel_y)  # Click on imported video
+        time.sleep(0.5)
+        pyautogui.drag(timeline_x - media_panel_x, timeline_y - media_panel_y, duration=0.5)
         time.sleep(2)
 
-        # Import talking person video clip
-        video_clip_path = self.config['video_clip_path']
-        print(f"Importing video clip: {video_clip_path}")
-        # Drag and drop or use import button
-        # This needs to be customized based on CapCut's interface
+        # Step 3: Loop video for 90 seconds
+        print("Step 3/8: Duplicating video to loop for 90 seconds...")
+        # Select video on timeline and duplicate it multiple times
+        pyautogui.click(timeline_x, timeline_y)
+        time.sleep(0.5)
 
-        print("\n⚠ CAPCUT AUTOMATION LIMITATION ⚠")
-        print("Automated GUI control for CapCut is complex and screen-resolution dependent.")
-        print("Please complete the following steps manually in CapCut:")
-        print(f"\n1. Import the talking person video: {video_clip_path}")
-        print("2. Drag it to the timeline")
-        print("3. Loop it for 1.5 minutes (90 seconds)")
-        print(f"4. At 1.5 min mark, add images from: {self.working_dir}")
-        print(f"5. Display each image for {(audio_duration - 90) / len(image_paths):.1f} seconds")
+        # Duplicate video clip (90 seconds = approximately 3-4 duplicates for typical clip)
+        for i in range(4):
+            pyautogui.hotkey('ctrl', 'd')  # Duplicate
+            time.sleep(1)
 
+        # Step 4: Import and add images
+        print(f"Step 4/8: Importing and adding {len(image_paths)} images...")
+        for i, image_path in enumerate(image_paths):
+            print(f"  Adding image {i+1}/{len(image_paths)}...")
+            pyautogui.hotkey('ctrl', 'i')
+            time.sleep(1)
+            pyautogui.write(image_path, interval=0.05)
+            time.sleep(0.5)
+            pyautogui.press('enter')
+            time.sleep(2)
+
+            # Drag image to timeline after video clips
+            pyautogui.click(media_panel_x, media_panel_y + (i * 50))
+            time.sleep(0.5)
+            timeline_image_x = timeline_x + (200 * (i + 1))  # Position after videos
+            pyautogui.drag(timeline_image_x - media_panel_x, timeline_y - (media_panel_y + (i * 50)), duration=0.5)
+            time.sleep(1)
+
+        # Step 5: Import and add voiceover
         if voiceover_path:
-            print(f"6. Import voiceover: {voiceover_path}")
-            print("7. Add voiceover to audio track")
-            print(f"8. Import subtitles: {subtitle_path}")
-            print("9. Add subtitles to the video (CapCut: Text -> Auto Captions or manually import SRT)")
-            print("10. Export as MP4")
-        else:
-            print("6. (No voiceover - skip audio track)")
-            print(f"7. Import subtitles: {subtitle_path}")
-            print("8. Add subtitles to the video")
-            print("9. Export as MP4")
+            print("Step 5/8: Importing voiceover...")
+            pyautogui.hotkey('ctrl', 'i')
+            time.sleep(1)
+            pyautogui.write(voiceover_path, interval=0.05)
+            time.sleep(0.5)
+            pyautogui.press('enter')
+            time.sleep(2)
 
+            # Drag voiceover to audio track
+            print("  Adding voiceover to audio track...")
+            audio_timeline_y = timeline_y + 100  # Audio track below video track
+            pyautogui.click(media_panel_x, media_panel_y)
+            time.sleep(0.5)
+            pyautogui.drag(timeline_x - media_panel_x, audio_timeline_y - media_panel_y, duration=0.5)
+            time.sleep(2)
+
+        # Step 6: Add subtitles
+        print("Step 6/8: Adding subtitles...")
+        # Click on Text button
+        text_button_x = int(screen_width * 0.05)
+        text_button_y = int(screen_height * 0.4)
+        pyautogui.click(text_button_x, text_button_y)
+        time.sleep(1)
+
+        # Look for "Auto captions" or "Import subtitles" option
+        # This varies by CapCut version, so we'll use keyboard navigation
+        pyautogui.press('tab')
+        time.sleep(0.5)
+        pyautogui.press('tab')
+        time.sleep(0.5)
+        pyautogui.press('enter')
+        time.sleep(2)
+
+        # Import SRT file
+        pyautogui.write(subtitle_path, interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press('enter')
+        time.sleep(3)
+
+        # Step 7: Export video
+        print("Step 7/8: Exporting video...")
+        pyautogui.hotkey('ctrl', 'e')  # Export shortcut
+        time.sleep(3)
+
+        # Set export path
         export_path = self.working_dir / "final_video.mp4"
-        print(f"\n{'10' if voiceover_path else '9'}. Save exported video to: {export_path}")
+        pyautogui.write(str(export_path), interval=0.05)
+        time.sleep(0.5)
+        pyautogui.press('enter')
 
-        input("\nPress Enter when you've completed the video editing and export...")
+        print("Step 8/8: Waiting for export to complete...")
+        print("This may take several minutes depending on video length...")
 
-        if not export_path.exists():
-            manual_path = input(f"Could not find {export_path}. Enter the full path to your exported video: ")
-            export_path = Path(manual_path)
+        # Wait for export (check if file exists)
+        max_wait = 600  # 10 minutes max
+        waited = 0
+        while waited < max_wait:
+            if export_path.exists() and export_path.stat().st_size > 1000:  # File exists and > 1KB
+                time.sleep(5)  # Extra buffer to ensure export is complete
+                break
+            time.sleep(5)
+            waited += 5
+            if waited % 30 == 0:
+                print(f"  Still waiting... ({waited} seconds elapsed)")
 
-        print(f"✓ Video exported to: {export_path}")
-        return str(export_path)
+        if export_path.exists():
+            file_size = export_path.stat().st_size / (1024 * 1024)  # MB
+            print(f"\n✓ Video exported successfully!")
+            print(f"  File: {export_path}")
+            print(f"  Size: {file_size:.2f} MB")
+            return str(export_path)
+        else:
+            print("\n⚠ Export may not be complete. Please check CapCut.")
+            input("Press Enter once export is finished...")
+
+            if not export_path.exists():
+                manual_path = input(f"Could not find {export_path}. Enter the full path to your exported video: ")
+                export_path = Path(manual_path)
+
+            print(f"✓ Video exported to: {export_path}")
+            return str(export_path)
 
     def create_thumbnail_canva(self, title: str) -> str:
         """Create thumbnail using Canva."""
