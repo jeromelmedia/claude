@@ -1003,9 +1003,9 @@ PREMISE: [Korean translation]"""
         print(f"  [2/4] Overlaying {len(image_paths)} images...")
 
         if image_paths:
-            # Build filter_complex for image overlays
-            # Images will appear at evenly spaced intervals throughout the video
-            interval = audio_duration / (len(image_paths) + 1)
+            # Each image gets equal time: divide total duration by number of images
+            duration_per_image = audio_duration / len(image_paths)
+            print(f"    Each image will display for {duration_per_image:.1f} seconds")
 
             # Build inputs: -i base_video -i img1 -i img2 ...
             overlay_inputs = ['-i', str(temp_looped)]
@@ -1013,23 +1013,25 @@ PREMISE: [Korean translation]"""
                 overlay_inputs.extend(['-i', str(img_path)])
 
             # Build filter chain for overlays
-            # Each image scales to fit screen, fades in/out, appears at specific time
+            # Images appear sequentially, each taking up equal portion of video
             filters = []
             current_input = '0:v'
 
             for i, img_path in enumerate(image_paths):
                 img_num = i + 1
-                start_time = interval * (i + 1)
-                duration = 3.0  # Each image shows for 3 seconds
+                start_time = i * duration_per_image
+                end_time = (i + 1) * duration_per_image
 
                 # Scale image to fit 1/4 of screen (bottom-right corner)
                 scale_filter = f"[{img_num}:v]scale=480:270[img{i}]"
                 filters.append(scale_filter)
 
-                # Overlay with fade in/out
-                overlay_filter = f"[{current_input}][img{i}]overlay=W-w-20:H-h-20:enable='between(t,{start_time},{start_time+duration})'[v{i}]"
+                # Overlay image for its time slot
+                overlay_filter = f"[{current_input}][img{i}]overlay=W-w-20:H-h-20:enable='between(t,{start_time},{end_time})'[v{i}]"
                 filters.append(overlay_filter)
                 current_input = f"v{i}"
+
+                print(f"    Image {i+1}: {start_time:.1f}s - {end_time:.1f}s")
 
             filter_complex = ';'.join(filters)
 
@@ -1051,7 +1053,7 @@ PREMISE: [Korean translation]"""
                 temp_with_images = temp_looped
                 print("    ⚠ Continuing without image overlays")
             else:
-                print(f"    ✓ {len(image_paths)} images overlaid")
+                print(f"    ✓ {len(image_paths)} images overlaid sequentially")
         else:
             # No images, just copy the looped video
             temp_with_images = temp_looped
