@@ -12,8 +12,10 @@ import json
 import requests
 import subprocess
 import asyncio
+import random
+import glob
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple
 import anthropic
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -793,53 +795,110 @@ PREMISE: [Korean translation]"""
             print("Using default duration of 300 seconds (5 minutes)")
             return 300.0
 
-    def generate_images(self, title: str, premise: str, num_images: int = 4) -> List[str]:
-        """Generate images using pollinations.ai.
+    def select_character(self) -> Tuple[str, Path]:
+        """Prompt user to select a character folder.
 
-        Images will be 1920x1080 (widescreen landscape) and show the same person
-        from different camera angles as specified in the config.
+        Returns:
+            Tuple of (character_name, character_folder_path)
         """
-        print(f"\n=== STEP 6: Generating {num_images} Images ===")
+        print("\n" + "=" * 60)
+        print("=== CHARACTER SELECTION ===")
+        print("=" * 60)
 
-        # Get person description from config
-        person_description = self.config.get('person_description', 'professional presenter in business casual attire')
-        print(f"Person description (from config): {person_description}")
+        # Get base characters path from config
+        characters_base_path = self.config.get('characters_base_path', './characters')
+        base_path = Path(characters_base_path)
 
-        # Define different camera angles/shots for variety
-        shot_types = [
-            "wide shot, full body visible",
-            "close-up shot, focusing on face and upper body",
-            "side angle shot, 45 degree perspective",
-            "over-the-shoulder shot, dynamic angle"
-        ]
+        if not base_path.exists():
+            print(f"\n✗ Characters folder not found: {base_path}")
+            print("\nPlease create character folders with this structure:")
+            print("  characters/")
+            print("    talking_person1/")
+            print("      talking_person1.mp4")
+            print("      image1.jpg")
+            print("      image2.png")
+            print("      ...")
+            print("    talking_person2/")
+            print("      talking_person2.mp4")
+            print("      ...")
+            sys.exit(1)
 
-        image_paths = []
+        # Find all character folders
+        character_folders = [d for d in base_path.iterdir() if d.is_dir()]
 
-        for i in range(num_images):
-            print(f"\nGenerating image {i+1}/{num_images}...")
+        if not character_folders:
+            print(f"\n✗ No character folders found in: {base_path}")
+            print("\nPlease create at least one character folder.")
+            sys.exit(1)
 
-            # Create varied prompts with different camera angles
-            shot_description = shot_types[i] if i < len(shot_types) else f"variation {i+1}"
-            prompt = f"{person_description}, {shot_description}, professional lighting, high quality, cinematic"
+        # Display available characters
+        print(f"\nFound {len(character_folders)} character(s):\n")
+        for i, folder in enumerate(character_folders, 1):
+            # Count images in folder
+            image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.webp']
+            image_count = sum(len(list(folder.glob(ext))) for ext in image_extensions)
 
-            # Use pollinations.ai API with 1920x1080 dimensions
-            encoded_prompt = requests.utils.quote(prompt)
-            image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1920&height=1080"
+            # Check for MP4 file
+            mp4_files = list(folder.glob('*.mp4'))
+            has_video = "✓" if mp4_files else "✗"
 
-            print(f"Shot type: {shot_description}")
-            print(f"Downloading image from pollinations.ai...")
-            response = requests.get(image_url, timeout=60)
+            print(f"  {i}. {folder.name}")
+            print(f"     Video: {has_video} | Images: {image_count}")
 
-            if response.status_code == 200:
-                image_path = self.working_dir / f"person_image_{i+1}.jpg"
-                with open(image_path, 'wb') as f:
-                    f.write(response.content)
-                image_paths.append(str(image_path))
-                print(f"✓ Image {i+1} saved to: {image_path} (1920x1080)")
-            else:
-                print(f"✗ Failed to download image {i+1}")
+        # Get user choice
+        while True:
+            try:
+                choice = input(f"\nSelect character (1-{len(character_folders)}): ").strip()
+                choice_idx = int(choice) - 1
 
-            time.sleep(2)  # Rate limiting
+                if 0 <= choice_idx < len(character_folders):
+                    selected_folder = character_folders[choice_idx]
+                    print(f"\n✓ Selected: {selected_folder.name}")
+                    return selected_folder.name, selected_folder
+                else:
+                    print(f"Please enter a number between 1 and {len(character_folders)}")
+            except (ValueError, KeyboardInterrupt):
+                print("\n✗ Cancelled by user")
+                sys.exit(0)
+
+    def get_character_images(self, character_folder: Path, num_images: int = 4) -> List[str]:
+        """Load pre-generated images from character folder.
+
+        Args:
+            character_folder: Path to character folder containing images
+            num_images: Number of images to randomly select
+
+        Returns:
+            List of image file paths
+        """
+        print(f"\n=== STEP 6: Loading Images from Character Folder ===")
+
+        # Find all images in the folder
+        image_extensions = ['*.jpg', '*.jpeg', '*.png', '*.webp', '*.JPG', '*.JPEG', '*.PNG', '*.WEBP']
+        all_images = []
+
+        for ext in image_extensions:
+            all_images.extend(character_folder.glob(ext))
+
+        if not all_images:
+            print(f"\n✗ No images found in: {character_folder}")
+            print("\nPlease add images to this character folder.")
+            sys.exit(1)
+
+        print(f"✓ Found {len(all_images)} image(s) in character folder")
+
+        # Randomly select N images
+        if len(all_images) <= num_images:
+            selected_images = all_images
+            print(f"✓ Using all {len(selected_images)} images")
+        else:
+            selected_images = random.sample(all_images, num_images)
+            print(f"✓ Randomly selected {num_images} images from {len(all_images)} available")
+
+        # Convert to strings and print
+        image_paths = [str(img) for img in selected_images]
+        for i, img_path in enumerate(image_paths, 1):
+            print(f"  {i}. {Path(img_path).name}")
 
         return image_paths
 
@@ -979,8 +1038,8 @@ PREMISE: [Korean translation]"""
         pyautogui.click(center_x, create_project_y)
         time.sleep(3)
 
-        # Get paths
-        video_clip_path = self.config.get('video_clip_path', './talking_person.mp4')
+        # Get character video path (selected at start of macro)
+        video_clip_path = self.selected_character_video
 
         print("\n🤖 STARTING FULL CAPCUT AUTOMATION...")
         print("=" * 60)
@@ -1180,6 +1239,23 @@ PREMISE: [Korean translation]"""
         print("=" * 60)
 
         try:
+            # STEP 0: Select character to use for this video
+            character_name, character_folder = self.select_character()
+
+            # Find the character's MP4 file
+            mp4_files = list(character_folder.glob('*.mp4'))
+            if not mp4_files:
+                print(f"\n✗ No MP4 file found in {character_folder}")
+                print("Please add a video file to this character folder.")
+                sys.exit(1)
+
+            character_video_path = str(mp4_files[0])
+            print(f"✓ Using video: {Path(character_video_path).name}")
+
+            # Store character info for later use
+            self.selected_character_folder = character_folder
+            self.selected_character_video = character_video_path
+
             # PHASE 1: Generate all English content
             print("\n📝 PHASE 1: GENERATE ALL ENGLISH CONTENT")
             print("=" * 60)
@@ -1222,8 +1298,9 @@ PREMISE: [Korean translation]"""
             # Step 6: Generate subtitles from Korean script
             subtitle_path = self.generate_subtitles(korean_script)
 
-            # Step 7: Generate images
-            image_paths = self.generate_images(english_title, english_premise)
+            # Step 7: Load images from character folder
+            num_images = self.config.get('num_images', 4)
+            image_paths = self.get_character_images(self.selected_character_folder, num_images)
 
             # Step 8: Edit video in CapCut
             video_path = self.edit_video_capcut(voiceover_path, image_paths, subtitle_path)

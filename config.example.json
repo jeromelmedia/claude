@@ -17,9 +17,12 @@
   "tts_volume": 1.0,
   "_comment_tts_volume": "Volume (0-10, default: 1.0)",
 
-  "video_clip_path": "./talking_person.mp4",
-  "person_description": "young asian woman with long black hair, wearing a white blouse, professional presenter",
-  "_comment_person": "Describe the person in your talking_person.mp4 video. Used to generate consistent images with different camera angles. Be specific about appearance, clothing, and style.",
+  "characters_base_path": "./characters",
+  "_comment_characters": "Path to folder containing character subfolders. Each character folder should have: (1) One MP4 video file, (2) Multiple image files (JPG/PNG/WEBP). Example structure:",
+  "_example_structure_1": "characters/talking_person1/talking_person1.mp4",
+  "_example_structure_2": "characters/talking_person1/image1.jpg, image2.png, ...",
+  "_example_structure_3": "characters/talking_person2/talking_person2.mp4",
+  "_example_structure_4": "characters/talking_person2/photo1.jpg, photo2.jpg, ...",
 
   "capcut_path": "C:/Users/alexh/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/CapCut/CapCut.lnk",
   "_comment_capcut": "Path to CapCut shortcut or executable. For Windows, use forward slashes OR double backslashes",
