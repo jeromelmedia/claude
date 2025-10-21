@@ -24,9 +24,6 @@
   "_example_structure_3": "Talking people/talking_person2/talking_person2.mp4",
   "_example_structure_4": "Talking people/talking_person2/photo1.jpg, photo2.jpg, ...",
 
-  "capcut_path": "C:/Users/alexh/AppData/Roaming/Microsoft/Windows/Start Menu/Programs/CapCut/CapCut.lnk",
-  "_comment_capcut": "Path to CapCut shortcut or executable. For Windows, use forward slashes OR double backslashes",
-
   "chrome_profile_path": "",
   "_comment_chrome_path": "For Windows paths, use forward slashes OR double backslashes. Examples:",
   "_example_windows_1": "C:/Users/YourName/AppData/Local/Google/Chrome/User Data/Default",

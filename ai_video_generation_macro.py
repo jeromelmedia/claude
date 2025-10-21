@@ -944,240 +944,189 @@ PREMISE: [Korean translation]"""
 
         print("\n✓ Finished replaying all actions!")
 
-    def edit_video_capcut(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
-        """Edit video using CapCut with automation.
+    def edit_video_ffmpeg(self, voiceover_path: Optional[str], image_paths: List[str], subtitle_path: str) -> str:
+        """Edit video using FFmpeg - reliable command-line video editing.
 
-        If capcut_actions.json exists, it will replay those recorded actions.
-        Otherwise, it will attempt automatic automation (which may not work perfectly).
-
-        To record your own actions:
-        1. Run: python capcut_recorder.py
-        2. Press 's' to start recording
-        3. Perform your complete CapCut workflow
-        4. Press 'q' to save
-        5. The macro will automatically use the recording next time
+        Steps:
+        1. Loop the talking person video to match voiceover duration
+        2. Overlay images at different timestamps
+        3. Replace audio with voiceover
+        4. Burn in subtitles from SRT file
+        5. Export as final_video.mp4
         """
-        print("\n=== STEP 8: Editing Video in CapCut ===")
+        print("\n=== STEP 8: Editing Video with FFmpeg ===")
 
-        # Check if we have recorded actions to replay
-        actions_path = Path(__file__).parent / "capcut_actions.json"
+        # Get paths
+        video_path = self.selected_character_video
+        output_path = self.working_dir / "final_video.mp4"
 
-        if actions_path.exists():
-            print("✓ Found recorded CapCut actions - will replay them!")
-            self.replay_capcut_actions(actions_path)
-
-            # Wait for export to complete
-            print("\nWaiting for video export to complete...")
-            print("(Checking for final_video.mp4 in output folder)")
-
-            export_path = self.working_dir / "final_video.mp4"
-            max_wait = 600  # 10 minutes
-            waited = 0
-
-            while waited < max_wait:
-                if export_path.exists() and export_path.stat().st_size > 1000:
-                    print(f"✓ Video exported successfully: {export_path}")
-                    return str(export_path)
-
-                time.sleep(5)
-                waited += 5
-
-                if waited % 30 == 0:
-                    print(f"  Still waiting... ({waited}/{max_wait} seconds)")
-
-            print("⚠ Export timeout - please check CapCut manually")
-            return str(export_path)
-
-        # Otherwise, fall back to automatic automation (may not work)
-        print("⚠ No recorded actions found (capcut_actions.json)")
-        print("⚠ Attempting automatic automation, but this may not work correctly")
-        print("⚠ For best results, run: python capcut_recorder.py to record your actions")
-        print("\nNote: This will automatically control CapCut using your mouse/keyboard.")
-        print("⚠ DO NOT TOUCH YOUR MOUSE OR KEYBOARD! ⚠")
-        print("Starting in 5 seconds...")
-        time.sleep(5)
-
-        # Get screen resolution automatically
-        screen_width, screen_height = pyautogui.size()
-        print(f"✓ Screen resolution detected: {screen_width}x{screen_height}")
-
-        # Calculate coordinates based on screen resolution
-        center_x = screen_width // 2
-        center_y = screen_height // 2
-
-        # Get audio duration
+        # Get voiceover duration to know how long the final video should be
         if voiceover_path:
             audio_duration = self.get_audio_duration(voiceover_path)
-            print(f"Voiceover duration: {audio_duration:.2f} seconds")
+            print(f"✓ Voiceover duration: {audio_duration:.2f} seconds")
         else:
-            audio_duration = 300  # Default 5 minutes if no voiceover
-            print("No voiceover - using default 5 minute duration")
+            audio_duration = 90  # Default 90 seconds
+            print("✓ No voiceover - using 90 second default")
 
-        # Get CapCut path from config
-        capcut_path = self.config.get('capcut_path', 'C:\\Users\\alexh\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\CapCut\\CapCut.lnk')
+        print(f"✓ Input video: {Path(video_path).name}")
+        print(f"✓ Images to overlay: {len(image_paths)}")
+        print(f"✓ Subtitles: {Path(subtitle_path).name}")
+        print(f"✓ Output: {output_path}")
 
-        # Launch CapCut
-        print(f"Launching CapCut from: {capcut_path}")
-        try:
-            if sys.platform == "win32":
-                os.startfile(capcut_path)
+        # Build FFmpeg command
+        print("\n🎬 Building video with FFmpeg...")
+
+        # Step 1: Create base video (loop talking person to match audio duration)
+        temp_looped = self.working_dir / "temp_looped.mp4"
+        print("  [1/4] Looping base video to match audio duration...")
+
+        loop_cmd = [
+            'ffmpeg', '-y',
+            '-stream_loop', '-1',  # Loop indefinitely
+            '-i', str(video_path),
+            '-t', str(audio_duration),  # Cut to exact duration
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-an',  # No audio yet
+            str(temp_looped)
+        ]
+
+        result = subprocess.run(loop_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error looping video: {result.stderr}")
+            sys.exit(1)
+        print("    ✓ Base video looped")
+
+        # Step 2: Overlay images at different timestamps
+        temp_with_images = self.working_dir / "temp_with_images.mp4"
+        print(f"  [2/4] Overlaying {len(image_paths)} images...")
+
+        if image_paths:
+            # Build filter_complex for image overlays
+            # Images will appear at evenly spaced intervals throughout the video
+            interval = audio_duration / (len(image_paths) + 1)
+
+            # Build inputs: -i base_video -i img1 -i img2 ...
+            overlay_inputs = ['-i', str(temp_looped)]
+            for img_path in image_paths:
+                overlay_inputs.extend(['-i', str(img_path)])
+
+            # Build filter chain for overlays
+            # Each image scales to fit screen, fades in/out, appears at specific time
+            filters = []
+            current_input = '0:v'
+
+            for i, img_path in enumerate(image_paths):
+                img_num = i + 1
+                start_time = interval * (i + 1)
+                duration = 3.0  # Each image shows for 3 seconds
+
+                # Scale image to fit 1/4 of screen (bottom-right corner)
+                scale_filter = f"[{img_num}:v]scale=480:270[img{i}]"
+                filters.append(scale_filter)
+
+                # Overlay with fade in/out
+                overlay_filter = f"[{current_input}][img{i}]overlay=W-w-20:H-h-20:enable='between(t,{start_time},{start_time+duration})'[v{i}]"
+                filters.append(overlay_filter)
+                current_input = f"v{i}"
+
+            filter_complex = ';'.join(filters)
+
+            overlay_cmd = [
+                'ffmpeg', '-y'
+            ] + overlay_inputs + [
+                '-filter_complex', filter_complex,
+                '-map', f'[{current_input}]',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                str(temp_with_images)
+            ]
+
+            result = subprocess.run(overlay_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"✗ Error overlaying images: {result.stderr}")
+                # Continue without images
+                temp_with_images = temp_looped
+                print("    ⚠ Continuing without image overlays")
             else:
-                subprocess.Popen([capcut_path])
-        except Exception as e:
-            print(f"✗ Failed to launch CapCut: {e}")
-            print("Trying alternative launch method...")
-            if sys.platform == "win32":
-                os.system("start CapCut")
-
-        print("Waiting for CapCut to load (10 seconds)...")
-        time.sleep(10)
-
-        # Click "Create Project" button (top center of screen)
-        print("Clicking 'Create Project' button...")
-        create_project_y = int(screen_height * 0.15)  # 15% from top
-        pyautogui.click(center_x, create_project_y)
-        time.sleep(3)
-
-        # Get character video path (selected at start of macro)
-        video_clip_path = self.selected_character_video
-
-        print("\n🤖 STARTING FULL CAPCUT AUTOMATION...")
-        print("=" * 60)
-        print("\n⚠ DO NOT TOUCH MOUSE OR KEYBOARD! ⚠\n")
-
-        # Step 1: Import video clip
-        print("Step 1/8: Importing video clip...")
-        pyautogui.hotkey('ctrl', 'i')  # Import shortcut
-        time.sleep(2)
-        pyautogui.write(video_clip_path, interval=0.05)
-        time.sleep(0.5)
-        pyautogui.press('enter')
-        time.sleep(3)
-
-        # Step 2: Drag video to timeline
-        print("Step 2/8: Adding video to timeline...")
-        media_panel_x = int(screen_width * 0.2)  # Left side media panel
-        media_panel_y = int(screen_height * 0.3)
-        timeline_x = int(screen_width * 0.5)
-        timeline_y = int(screen_height * 0.75)  # Timeline at bottom
-
-        pyautogui.click(media_panel_x, media_panel_y)  # Click on imported video
-        time.sleep(0.5)
-        pyautogui.drag(timeline_x - media_panel_x, timeline_y - media_panel_y, duration=0.5)
-        time.sleep(2)
-
-        # Step 3: Loop video for 90 seconds
-        print("Step 3/8: Duplicating video to loop for 90 seconds...")
-        # Select video on timeline and duplicate it multiple times
-        pyautogui.click(timeline_x, timeline_y)
-        time.sleep(0.5)
-
-        # Duplicate video clip (90 seconds = approximately 3-4 duplicates for typical clip)
-        for i in range(4):
-            pyautogui.hotkey('ctrl', 'd')  # Duplicate
-            time.sleep(1)
-
-        # Step 4: Import and add images
-        print(f"Step 4/8: Importing and adding {len(image_paths)} images...")
-        for i, image_path in enumerate(image_paths):
-            print(f"  Adding image {i+1}/{len(image_paths)}...")
-            pyautogui.hotkey('ctrl', 'i')
-            time.sleep(1)
-            pyautogui.write(image_path, interval=0.05)
-            time.sleep(0.5)
-            pyautogui.press('enter')
-            time.sleep(2)
-
-            # Drag image to timeline after video clips
-            pyautogui.click(media_panel_x, media_panel_y + (i * 50))
-            time.sleep(0.5)
-            timeline_image_x = timeline_x + (200 * (i + 1))  # Position after videos
-            pyautogui.drag(timeline_image_x - media_panel_x, timeline_y - (media_panel_y + (i * 50)), duration=0.5)
-            time.sleep(1)
-
-        # Step 5: Import and add voiceover
-        if voiceover_path:
-            print("Step 5/8: Importing voiceover...")
-            pyautogui.hotkey('ctrl', 'i')
-            time.sleep(1)
-            pyautogui.write(voiceover_path, interval=0.05)
-            time.sleep(0.5)
-            pyautogui.press('enter')
-            time.sleep(2)
-
-            # Drag voiceover to audio track
-            print("  Adding voiceover to audio track...")
-            audio_timeline_y = timeline_y + 100  # Audio track below video track
-            pyautogui.click(media_panel_x, media_panel_y)
-            time.sleep(0.5)
-            pyautogui.drag(timeline_x - media_panel_x, audio_timeline_y - media_panel_y, duration=0.5)
-            time.sleep(2)
-
-        # Step 6: Add subtitles
-        print("Step 6/8: Adding subtitles...")
-        # Click on Text button
-        text_button_x = int(screen_width * 0.05)
-        text_button_y = int(screen_height * 0.4)
-        pyautogui.click(text_button_x, text_button_y)
-        time.sleep(1)
-
-        # Look for "Auto captions" or "Import subtitles" option
-        # This varies by CapCut version, so we'll use keyboard navigation
-        pyautogui.press('tab')
-        time.sleep(0.5)
-        pyautogui.press('tab')
-        time.sleep(0.5)
-        pyautogui.press('enter')
-        time.sleep(2)
-
-        # Import SRT file
-        pyautogui.write(subtitle_path, interval=0.05)
-        time.sleep(0.5)
-        pyautogui.press('enter')
-        time.sleep(3)
-
-        # Step 7: Export video
-        print("Step 7/8: Exporting video...")
-        pyautogui.hotkey('ctrl', 'e')  # Export shortcut
-        time.sleep(3)
-
-        # Set export path
-        export_path = self.working_dir / "final_video.mp4"
-        pyautogui.write(str(export_path), interval=0.05)
-        time.sleep(0.5)
-        pyautogui.press('enter')
-
-        print("Step 8/8: Waiting for export to complete...")
-        print("This may take several minutes depending on video length...")
-
-        # Wait for export (check if file exists)
-        max_wait = 600  # 10 minutes max
-        waited = 0
-        while waited < max_wait:
-            if export_path.exists() and export_path.stat().st_size > 1000:  # File exists and > 1KB
-                time.sleep(5)  # Extra buffer to ensure export is complete
-                break
-            time.sleep(5)
-            waited += 5
-            if waited % 30 == 0:
-                print(f"  Still waiting... ({waited} seconds elapsed)")
-
-        if export_path.exists():
-            file_size = export_path.stat().st_size / (1024 * 1024)  # MB
-            print(f"\n✓ Video exported successfully!")
-            print(f"  File: {export_path}")
-            print(f"  Size: {file_size:.2f} MB")
-            return str(export_path)
+                print(f"    ✓ {len(image_paths)} images overlaid")
         else:
-            print("\n⚠ Export may not be complete. Please check CapCut.")
-            input("Press Enter once export is finished...")
+            # No images, just copy the looped video
+            temp_with_images = temp_looped
+            print("    ⚠ No images to overlay")
 
-            if not export_path.exists():
-                manual_path = input(f"Could not find {export_path}. Enter the full path to your exported video: ")
-                export_path = Path(manual_path)
+        # Step 3: Add subtitles
+        temp_with_subs = self.working_dir / "temp_with_subs.mp4"
+        print("  [3/4] Burning in subtitles...")
 
-            print(f"✓ Video exported to: {export_path}")
-            return str(export_path)
+        # Escape subtitle path for FFmpeg filter
+        subtitle_path_escaped = str(subtitle_path).replace('\\', '/').replace(':', '\\:')
+
+        subs_cmd = [
+            'ffmpeg', '-y',
+            '-i', str(temp_with_images),
+            '-vf', f"subtitles='{subtitle_path_escaped}'",
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            str(temp_with_subs)
+        ]
+
+        result = subprocess.run(subs_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error adding subtitles: {result.stderr}")
+            # Continue without subtitles
+            temp_with_subs = temp_with_images
+            print("    ⚠ Continuing without subtitles")
+        else:
+            print("    ✓ Subtitles burned in")
+
+        # Step 4: Add voiceover audio and export final video
+        print("  [4/4] Adding voiceover and exporting final video...")
+
+        if voiceover_path:
+            final_cmd = [
+                'ffmpeg', '-y',
+                '-i', str(temp_with_subs),
+                '-i', str(voiceover_path),
+                '-c:v', 'copy',  # Don't re-encode video
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-map', '0:v:0',  # Video from first input
+                '-map', '1:a:0',  # Audio from second input
+                '-shortest',  # Cut to shortest stream
+                str(output_path)
+            ]
+        else:
+            # No voiceover, just copy the video with subtitles
+            final_cmd = [
+                'ffmpeg', '-y',
+                '-i', str(temp_with_subs),
+                '-c', 'copy',
+                str(output_path)
+            ]
+
+        result = subprocess.run(final_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error creating final video: {result.stderr}")
+            sys.exit(1)
+
+        print("    ✓ Final video exported")
+
+        # Clean up temp files
+        print("\n🧹 Cleaning up temporary files...")
+        for temp_file in [temp_looped, temp_with_images, temp_with_subs]:
+            if temp_file.exists() and temp_file != output_path:
+                temp_file.unlink()
+                print(f"    ✓ Removed {temp_file.name}")
+
+        print(f"\n✅ Video editing complete: {output_path}")
+        print(f"   Duration: {audio_duration:.2f} seconds")
+        print(f"   Size: {output_path.stat().st_size / (1024*1024):.2f} MB")
+
+        return str(output_path)
 
     def create_thumbnail_canva(self, title: str) -> str:
         """Create thumbnail using Canva."""
@@ -1302,8 +1251,8 @@ PREMISE: [Korean translation]"""
             num_images = self.config.get('num_images', 4)
             image_paths = self.get_character_images(self.selected_character_folder, num_images)
 
-            # Step 8: Edit video in CapCut
-            video_path = self.edit_video_capcut(voiceover_path, image_paths, subtitle_path)
+            # Step 8: Edit video with FFmpeg
+            video_path = self.edit_video_ffmpeg(voiceover_path, image_paths, subtitle_path)
 
             # Step 9: Create thumbnail in Canva
             thumbnail_path = self.create_thumbnail_canva(english_title)
