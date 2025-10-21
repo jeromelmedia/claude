@@ -1507,14 +1507,73 @@ def main():
     """Main entry point."""
     import sys
 
-    # Check for test mode flag
-    if len(sys.argv) > 1 and sys.argv[1] == '--test':
-        print("\n🧪 Running in TEST MODE (FFmpeg only)\n")
-        macro = VideoGenerationMacro()
-        macro.test_ffmpeg()
-    else:
-        macro = VideoGenerationMacro()
-        macro.run()
+    macro = VideoGenerationMacro()
+
+    # Check for flags
+    if len(sys.argv) > 1:
+        flag = sys.argv[1]
+
+        if flag == '--test':
+            print("\n🧪 Running in TEST MODE (FFmpeg only)\n")
+            macro.test_ffmpeg()
+            return
+
+        elif flag == '--resume':
+            print("\n⏩ RESUME MODE - Skipping to FFmpeg\n")
+            print("=" * 60)
+            print("Using existing files from output/ folder")
+            print("=" * 60)
+
+            # Use output/ folder directly
+            macro.working_dir = macro.base_output_dir
+
+            # Check for required files
+            voiceover_path = macro.working_dir / "voiceover.mp3"
+            subtitle_path = macro.working_dir / "subtitles.srt"
+
+            if not voiceover_path.exists():
+                print(f"\n✗ Missing: {voiceover_path}")
+                print("Please run the macro normally first to generate files")
+                sys.exit(1)
+
+            if not subtitle_path.exists():
+                print(f"\n✗ Missing: {subtitle_path}")
+                print("Please run the macro normally first to generate files")
+                sys.exit(1)
+
+            print(f"\n✓ Found: {voiceover_path.name} ({voiceover_path.stat().st_size / (1024*1024):.2f} MB)")
+            print(f"✓ Found: {subtitle_path.name}\n")
+
+            # Select character
+            character_name, character_folder = macro.select_character()
+            mp4_files = list(character_folder.glob('*.mp4'))
+            if not mp4_files:
+                print(f"\n✗ No MP4 file found in {character_folder}")
+                sys.exit(1)
+
+            macro.selected_character_video = str(mp4_files[0])
+            macro.selected_character_folder = character_folder
+            print(f"\n✓ Using video: {Path(macro.selected_character_video).name}\n")
+
+            # Load images
+            print("🖼 Loading images from character folder...")
+            num_images = macro.config.get('num_images', 4)
+            image_paths = macro.get_character_images(macro.selected_character_folder, num_images)
+            print()
+
+            # Run FFmpeg ONLY
+            print("🎬 Running FFmpeg video editing...\n")
+            video_path = macro.edit_video_ffmpeg(str(voiceover_path), image_paths, str(subtitle_path))
+
+            print("\n" + "=" * 60)
+            print("✅ RESUME COMPLETE!")
+            print("=" * 60)
+            print(f"\nVideo: {video_path}")
+            print(f"Folder: {macro.working_dir}")
+            return
+
+    # Normal mode
+    macro.run()
 
 
 if __name__ == "__main__":
