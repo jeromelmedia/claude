@@ -48,10 +48,17 @@ class VideoGenerationMacro:
         self.config = self.load_config(config_path)
         self.claude_client = anthropic.Anthropic(api_key=self.config['anthropic_api_key'])
         self.project_id = self.config['claude_project_id']
-        self.voice_id = self.config['voice_id']
+        self.voice_id = self.config.get('voice_id', '')
         # Use configured model or default to claude-3-sonnet-20240229 (most widely available)
         self.model = self.config.get('claude_model', 'claude-3-sonnet-20240229')
+
+        # Load custom instructions from project (if provided)
+        self.custom_instructions = self.config.get('custom_instructions',
+            "You are a video script writer. Follow your training and the writing style you've been taught in this project.")
+
         print(f"Using Claude model: {self.model}")
+        print(f"Project ID: {self.project_id}")
+
         self.working_dir = Path("./output")
         self.working_dir.mkdir(exist_ok=True)
 
@@ -99,11 +106,11 @@ class VideoGenerationMacro:
                 message = self.claude_client.messages.create(
                     model=self.model,
                     max_tokens=500,
+                    system=self.custom_instructions,
                     messages=[{
                         "role": "user",
-                        "content": "Generate a compelling video title based on your training. Just provide the title, nothing else."
-                    }],
-                    metadata={"user_id": self.project_id}
+                        "content": "Generate a compelling video title in the style and topic you've been trained on in this project. Just provide the title, nothing else."
+                    }]
                 )
             except anthropic.NotFoundError as e:
                 print(f"\n✗ ERROR: Model '{self.model}' not found or not accessible")
@@ -142,11 +149,11 @@ class VideoGenerationMacro:
         message = self.claude_client.messages.create(
             model=self.model,
             max_tokens=500,
+            system=self.custom_instructions,
             messages=[{
                 "role": "user",
-                "content": f"Write a 2-3 sentence premise/description for a video titled '{title}'. This should explain what the video is about."
-            }],
-            metadata={"user_id": self.project_id}
+                "content": f"Write a 2-3 sentence premise/description for a video titled '{title}'. This should explain what the video is about in the style and topic you've been trained on."
+            }]
         )
 
         premise = message.content[0].text.strip()
@@ -185,8 +192,8 @@ Target words for this segment: approximately {target_words_per_segment} words.
         message = self.claude_client.messages.create(
             model=self.model,
             max_tokens=4096,
-            messages=[{"role": "user", "content": prompt}],
-            metadata={"user_id": self.project_id}
+            system=self.custom_instructions,
+            messages=[{"role": "user", "content": prompt}]
         )
 
         return message.content[0].text.strip()
@@ -228,8 +235,8 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             message = self.claude_client.messages.create(
                 model=self.model,
                 max_tokens=4096,
-                messages=[{"role": "user", "content": additional_prompt}],
-                metadata={"user_id": self.project_id}
+                system=self.custom_instructions,
+                messages=[{"role": "user", "content": additional_prompt}]
             )
 
             additional_content = message.content[0].text.strip()
