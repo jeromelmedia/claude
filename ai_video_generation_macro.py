@@ -398,6 +398,8 @@ Target words for this segment: approximately {target_words_per_segment} words.
         # If under 6000 words, generate additional content
         while total_words < 6000:
             print(f"\nWord count ({total_words}) is below target. Generating additional content...")
+            print("⏱ Waiting 65 seconds before generating more content...")
+            time.sleep(65)
 
             additional_prompt = f"""The current script has {total_words} words but needs to be 6000-7000 words.
 
@@ -406,17 +408,32 @@ Premise: {english_premise}
 
 Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target."""
 
-            message = self.claude_client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=self.custom_instructions,
-                messages=[{"role": "user", "content": additional_prompt}]
-            )
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    message = self.claude_client.messages.create(
+                        model=self.model,
+                        max_tokens=4096,
+                        system=self.custom_instructions,
+                        messages=[{"role": "user", "content": additional_prompt}]
+                    )
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                        delay = 10 * (2 ** attempt)  # 10s, 20s, 40s
+                        print(f"  ⚠ Rate limit hit. Waiting {delay} seconds before retry...")
+                        time.sleep(delay)
+                    else:
+                        raise
 
             additional_content = message.content[0].text.strip()
             full_script += "\n\n" + additional_content
             total_words = self.count_words(full_script)
             print(f"Updated word count: {total_words}")
+
+            # Delay after heavy API call
+            print("  ⏱ Waiting 65 seconds to avoid rate limit...")
+            time.sleep(65)
 
         # If over 7000 words, trim
         if total_words > 7000:
