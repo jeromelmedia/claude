@@ -46,8 +46,21 @@ class VideoGenerationMacro:
     def load_config(self, config_path: str) -> dict:
         """Load configuration from JSON file."""
         if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                return json.load(f)
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except json.JSONDecodeError as e:
+                print(f"\n✗ ERROR: Invalid JSON in {config_path}")
+                print(f"   {e}")
+                print("\nCommon issues:")
+                print("1. Windows paths need FORWARD slashes or DOUBLE backslashes:")
+                print("   ✓ Good: \"C:/Users/Name/path\"")
+                print("   ✓ Good: \"C:\\\\Users\\\\Name\\\\path\"")
+                print("   ✗ Bad:  \"C:\\Users\\Name\\path\"")
+                print("\n2. Make sure all strings are in quotes")
+                print("3. No trailing commas after last item")
+                print(f"\nPlease fix {config_path} and try again.")
+                sys.exit(1)
         else:
             # Create default config template
             default_config = {
