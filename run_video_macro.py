@@ -54,6 +54,7 @@ def main():
         ("pillow", "PIL"),
         ("pyautogui", "pyautogui"),
         ("webdriver-manager", "webdriver_manager"),
+        ("edge-tts", "edge_tts"),
     ]
 
     # Optional packages (only for Python < 3.13)

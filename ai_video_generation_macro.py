@@ -11,6 +11,7 @@ import time
 import json
 import requests
 import subprocess
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict
 import anthropic
@@ -29,6 +30,14 @@ try:
 except ImportError:
     PYDUB_AVAILABLE = False
     print("Note: pydub not available, will use ffprobe for audio duration")
+
+# Import edge-tts for voiceover generation
+try:
+    import edge_tts
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+    print("Note: edge-tts not available, will try browser automation")
 
 
 class VideoGenerationMacro:
@@ -290,120 +299,77 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
         print(f"✓ Korean script saved to: {korean_path}")
         return korean_script
 
+    async def _generate_voiceover_edge_tts(self, korean_script: str, output_path: str, voice: str = "ko-KR-SunHiNeural"):
+        """Internal async function to generate voiceover using edge-tts."""
+        communicate = edge_tts.Communicate(korean_script, voice)
+        await communicate.save(output_path)
+
     def generate_voiceover(self, korean_script: str) -> str:
-        """Generate voiceover using genaipro.vn."""
+        """Generate voiceover using Microsoft Edge TTS (FREE, no API key needed)."""
         print("\n=== STEP 5: Generating Voiceover ===")
 
         # Check if manual voiceover already exists
-        manual_voiceover = self.working_dir / "voiceover.mp3"
-        if manual_voiceover.exists():
-            print(f"✓ Found existing voiceover at: {manual_voiceover}")
+        voiceover_path = self.working_dir / "voiceover.mp3"
+        if voiceover_path.exists():
+            print(f"✓ Found existing voiceover at: {voiceover_path}")
             use_existing = input("Use this existing voiceover? [y/n]: ").lower()
             if use_existing == 'y':
-                return str(manual_voiceover)
+                return str(voiceover_path)
 
-        print("\nAttempting automated voiceover generation...")
-        print("Note: This may fail due to network issues or site changes.")
+        if not EDGE_TTS_AVAILABLE:
+            print("\n✗ edge-tts not installed!")
+            print("Installing edge-tts...")
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "edge-tts", "--user"])
+                print("✓ edge-tts installed! Please run the script again.")
+                sys.exit(0)
+            except:
+                print("✗ Failed to install edge-tts")
+                print("\nPlease install manually:")
+                print("  pip install edge-tts")
+                sys.exit(1)
+
+        # Get voice from config, or use default Korean voice
+        voice_name = self.config.get('tts_voice', 'ko-KR-SunHiNeural')
+
+        print(f"\nGenerating voiceover with Microsoft Edge TTS...")
+        print(f"Voice: {voice_name}")
+        print(f"Script length: {len(korean_script)} characters")
+        print("\nThis may take a few minutes depending on script length...")
 
         try:
-            # Setup Chrome driver
-            chrome_options = Options()
-            if self.config.get('chrome_profile_path'):
-                chrome_options.add_argument(f"user-data-dir={self.config['chrome_profile_path']}")
+            # Run async function
+            asyncio.run(self._generate_voiceover_edge_tts(
+                korean_script,
+                str(voiceover_path),
+                voice_name
+            ))
 
-            driver = webdriver.Chrome(options=chrome_options)
-
-            try:
-                # Navigate to genaipro.vn
-                print("Connecting to genaipro.vn...")
-                driver.get("https://genaipro.vn")
-                time.sleep(3)
-
-                # Find text input and paste script
-                print("Entering script into voiceover generator...")
-                text_input = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located((By.CSS_SELECTOR, "textarea, [contenteditable='true']"))
-                )
-                text_input.clear()
-                text_input.send_keys(korean_script)
-
-                # Select voice
-                print(f"Selecting voice ID: {self.voice_id}")
-                # This will need to be customized based on the actual website structure
-                voice_selector = driver.find_element(By.ID, "voice-selector")  # Adjust selector
-                voice_selector.click()
-                time.sleep(1)
-
-                voice_option = driver.find_element(By.XPATH, f"//option[@value='{self.voice_id}']")
-                voice_option.click()
-
-                # Generate voiceover
-                print("Generating voiceover...")
-                generate_button = driver.find_element(By.XPATH, "//button[contains(text(), 'Generate') or contains(text(), 'Tạo')]")
-                generate_button.click()
-
-                # Wait for generation to complete
-                print("Waiting for voiceover generation to complete...")
-                time.sleep(30)  # Adjust based on typical generation time
-
-                # Download voiceover
-                print("Downloading voiceover...")
-                download_button = WebDriverWait(driver, 120).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Download') or contains(text(), 'Tải')]"))
-                )
-                download_button.click()
-
-                time.sleep(10)  # Wait for download
-
-                # Find the downloaded file (assumes it goes to default downloads folder)
-                downloads_path = Path.home() / "Downloads"
-                voiceover_files = sorted(downloads_path.glob("*.mp3"), key=lambda x: x.stat().st_mtime, reverse=True)
-
-                if voiceover_files:
-                    latest_voiceover = voiceover_files[0]
-                    voiceover_path = self.working_dir / "voiceover.mp3"
-                    latest_voiceover.rename(voiceover_path)
-                    print(f"✓ Voiceover saved to: {voiceover_path}")
-                    return str(voiceover_path)
-                else:
-                    raise Exception("Could not find downloaded voiceover file")
-
-            finally:
-                driver.quit()
+            if voiceover_path.exists():
+                file_size = voiceover_path.stat().st_size / (1024 * 1024)  # MB
+                print(f"\n✓ Voiceover generated successfully!")
+                print(f"  File: {voiceover_path}")
+                print(f"  Size: {file_size:.2f} MB")
+                return str(voiceover_path)
+            else:
+                raise Exception("Voiceover file was not created")
 
         except Exception as e:
-            print(f"\n✗ Automated voiceover generation failed: {e}")
-            print("\n" + "=" * 60)
-            print("MANUAL VOICEOVER GENERATION REQUIRED")
-            print("=" * 60)
-            print("\nThe Korean script has been saved to:")
-            print(f"  {self.working_dir / 'video_script_korean.txt'}")
-            print("\nPlease manually generate the voiceover:")
-            print("1. Go to https://genaipro.vn (or your preferred TTS service)")
-            print("2. Copy the Korean script from the file above")
-            print("3. Select your voice and generate the voiceover")
-            print("4. Download the voiceover as MP3")
-            print(f"5. Save it as: {self.working_dir / 'voiceover.mp3'}")
-            print("\nAlternative TTS services:")
-            print("  - elevenlabs.io")
-            print("  - play.ht")
-            print("  - murf.ai")
-            print("  - Google Cloud Text-to-Speech")
-            print("\n" + "=" * 60)
+            print(f"\n✗ Voiceover generation failed: {e}")
+            print("\nTroubleshooting:")
+            print("1. Check your internet connection (edge-tts needs to connect to Microsoft servers)")
+            print("2. Try a different voice in config.json:")
+            print("   'tts_voice': 'ko-KR-InJoonNeural' (Male)")
+            print("   'tts_voice': 'ko-KR-SunHiNeural' (Female, default)")
+            print("\n3. To see all available voices, run:")
+            print("   edge-tts --list-voices | grep ko-KR")
 
-            choice = input("\nOptions:\n  [w] Wait, I'll do it manually now\n  [s] Skip voiceover and continue\n  [q] Quit\nChoice: ").lower()
+            choice = input("\nOptions:\n  [r] Retry\n  [s] Skip voiceover\n  [q] Quit\nChoice: ").lower()
 
-            if choice == 'w':
-                input(f"\nPress Enter after you've saved the voiceover to: {manual_voiceover}")
-                if manual_voiceover.exists():
-                    print(f"✓ Voiceover found at: {manual_voiceover}")
-                    return str(manual_voiceover)
-                else:
-                    print(f"✗ Voiceover not found at: {manual_voiceover}")
-                    print("Continuing without voiceover...")
-                    return None
+            if choice == 'r':
+                return self.generate_voiceover(korean_script)  # Retry
             elif choice == 's':
-                print("Skipping voiceover generation...")
+                print("Skipping voiceover...")
                 return None
             else:
                 print("Exiting...")
