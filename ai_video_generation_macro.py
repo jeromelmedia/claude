@@ -23,6 +23,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 import pyautogui
 
+# Import project knowledge loader
+try:
+    from project_loader import ProjectKnowledgeLoader
+    PROJECT_LOADER_AVAILABLE = True
+except ImportError:
+    PROJECT_LOADER_AVAILABLE = False
+
 # Optional imports for audio handling
 try:
     from pydub import AudioSegment
@@ -53,10 +60,29 @@ class VideoGenerationMacro:
         self.model = self.config.get('claude_model', 'claude-3-sonnet-20240229')
 
         # Load custom instructions from project (if provided)
-        self.custom_instructions = self.config.get('custom_instructions',
+        base_instructions = self.config.get('custom_instructions',
             "You are a video script writer. Follow your training and the writing style you've been taught in this project.")
 
-        print(f"Using Claude model: {self.model}")
+        # Load project knowledge base from files
+        project_files_dir = self.config.get('project_files_dir', './project_files')
+        if PROJECT_LOADER_AVAILABLE:
+            loader = ProjectKnowledgeLoader(project_files_dir)
+            project_files = loader.get_file_list()
+
+            if project_files:
+                print(f"\n✓ Loading {len(project_files)} project file(s) from: {project_files_dir}")
+                for f in project_files:
+                    print(f"  - {f}")
+                self.custom_instructions = loader.create_system_prompt(base_instructions)
+                print(f"✓ Project knowledge loaded ({len(self.custom_instructions)} chars)")
+            else:
+                print(f"\n⚠ No project files found in: {project_files_dir}")
+                print("  To use project files: create 'project_files' folder and add your reference files")
+                self.custom_instructions = base_instructions
+        else:
+            self.custom_instructions = base_instructions
+
+        print(f"\nUsing Claude model: {self.model}")
         print(f"Project ID: {self.project_id}")
 
         self.working_dir = Path("./output")
