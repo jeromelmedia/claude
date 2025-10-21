@@ -122,21 +122,34 @@ class VideoGenerationMacro:
             sys.exit(1)
 
     def translate_to_korean_simple(self, text: str, label: str = "text") -> str:
-        """Translate a short text to Korean."""
+        """Translate a short text to Korean with rate limit retry."""
         print(f"\nTranslating {label} to Korean...")
 
-        message = self.claude_client.messages.create(
-            model=self.model,
-            max_tokens=1000,
-            messages=[{
-                "role": "user",
-                "content": f"Translate the following {label} to Korean. Maintain the tone and style:\n\n{text}"
-            }]
-        )
+        max_retries = 5
+        base_delay = 2
 
-        translation = message.content[0].text.strip()
-        print(f"Korean {label}: {translation}")
-        return translation
+        for attempt in range(max_retries):
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=1000,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Translate the following {label} to Korean. Maintain the tone and style:\n\n{text}"
+                    }]
+                )
+
+                translation = message.content[0].text.strip()
+                print(f"Korean {label}: {translation}")
+                return translation
+
+            except Exception as e:
+                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt)  # Exponential backoff
+                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}...")
+                    time.sleep(delay)
+                else:
+                    raise  # Re-raise if not a rate limit error or max retries exceeded
 
     def generate_title(self) -> tuple:
         """Generate a video title in English, get approval, then translate to Korean. Returns (english_title, korean_title)."""
@@ -190,21 +203,35 @@ class VideoGenerationMacro:
         # Translate to Korean
         korean_title = self.translate_to_korean_simple(english_title, "title")
 
+        # Small delay to avoid rate limiting
+        time.sleep(2)
+
         return english_title, korean_title
 
     def generate_description(self, english_title: str) -> tuple:
         """Generate video description based on description files. Returns (english_description, korean_description)."""
         print("\n=== STEP 2: Generating Video Description (English) ===")
 
-        message = self.claude_client.messages.create(
-            model=self.model,
-            max_tokens=800,
-            system=self.custom_instructions,
-            messages=[{
-                "role": "user",
-                "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate."
-            }]
-        )
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                message = self.claude_client.messages.create(
+                    model=self.model,
+                    max_tokens=800,
+                    system=self.custom_instructions,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate."
+                    }]
+                )
+                break
+            except Exception as e:
+                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
+                    delay = 5 * (2 ** attempt)
+                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry...")
+                    time.sleep(delay)
+                else:
+                    raise
 
         english_description = message.content[0].text.strip()
         print(f"\nGenerated English Description:\n{english_description}")
@@ -223,6 +250,9 @@ class VideoGenerationMacro:
 
         # Translate to Korean
         korean_description = self.translate_to_korean_simple(english_description, "description")
+
+        # Small delay to avoid rate limiting
+        time.sleep(2)
 
         return english_description, korean_description
 
