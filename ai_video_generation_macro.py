@@ -200,22 +200,8 @@ class VideoGenerationMacro:
 
             english_title = message.content[0].text.strip()
             print(f"\nGenerated English Title: {english_title}")
-
-            response = input("\nOptions: [a]pprove, [t]weak, [d]eny (regenerate): ").lower()
-
-            if response == 'a':
-                print(f"✓ English title approved: {english_title}")
-                break
-            elif response == 't':
-                tweak = input("Enter your tweaked English title: ")
-                english_title = tweak
-                print(f"✓ Using tweaked title: {english_title}")
-                break
-            elif response == 'd':
-                print("Regenerating title...")
-                continue
-            else:
-                print("Invalid input. Please try again.")
+            print(f"✓ Auto-approved (running in full automation mode)")
+            break
 
         # Delay after heavy API call to avoid rate limiting
         # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
@@ -251,18 +237,7 @@ class VideoGenerationMacro:
 
         english_description = message.content[0].text.strip()
         print(f"\nGenerated English Description:\n{english_description}")
-
-        response = input("\nApprove this description? [y/n]: ").lower()
-
-        if response != 'y':
-            tweak = input("Enter your version (or press Enter to regenerate): ")
-            if tweak:
-                english_description = tweak
-                print(f"✓ Using your description")
-            else:
-                return self.generate_description(english_title)  # Regenerate
-
-        print(f"✓ Description approved")
+        print(f"✓ Auto-approved (running in full automation mode)")
 
         # Delay after heavy API call to avoid rate limiting
         # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
@@ -298,18 +273,7 @@ class VideoGenerationMacro:
 
         english_premise = message.content[0].text.strip()
         print(f"\nGenerated English Premise:\n{english_premise}")
-
-        response = input("\nApprove this premise? [y/n]: ").lower()
-
-        if response != 'y':
-            tweak = input("Enter your version (or press Enter to regenerate): ")
-            if tweak:
-                english_premise = tweak
-                print(f"✓ Using your premise")
-            else:
-                return self.generate_premise(english_title)  # Regenerate
-
-        print(f"✓ Premise approved")
+        print(f"✓ Auto-approved (running in full automation mode)")
 
         # Delay after heavy API call to avoid rate limiting
         # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
@@ -444,20 +408,13 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
-        # Show preview and get approval
+        # Show preview
         print("\n" + "=" * 60)
         print("SCRIPT PREVIEW (first 500 characters):")
         print("=" * 60)
         print(full_script[:500] + "...")
         print("=" * 60)
-
-        response = input("\nApprove this script? [y/n]: ").lower()
-
-        if response != 'y':
-            print("\n✗ Script not approved. Regenerating...")
-            return self.generate_full_script(english_title, english_premise)
-
-        print(f"✓ English script approved")
+        print(f"\n✓ Auto-approved (running in full automation mode)")
 
         # Save English script
         english_script_path = self.working_dir / "video_script_english.txt"
@@ -634,13 +591,10 @@ PREMISE: [Korean translation]"""
         """Generate voiceover using GenAIPro Max API."""
         print("\n=== STEP 5: Generating Voiceover ===")
 
-        # Check if manual voiceover already exists
+        # Always generate fresh voiceover (full automation mode)
         voiceover_path = self.working_dir / "voiceover.mp3"
         if voiceover_path.exists():
-            print(f"✓ Found existing voiceover at: {voiceover_path}")
-            use_existing = input("Use this existing voiceover? [y/n]: ").lower()
-            if use_existing == 'y':
-                return str(voiceover_path)
+            print(f"✓ Found existing voiceover, will overwrite with new generation (full automation mode)")
 
         # Get GenAIPro API credentials from config
         genaipro_api_key = self.config.get('genaipro_api_key')
@@ -756,17 +710,8 @@ PREMISE: [Korean translation]"""
             print("2. Check your balance at https://genaipro.vn")
             print("3. Verify the voice_id is correct")
             print("4. Check your internet connection")
-
-            choice = input("\nOptions:\n  [r] Retry\n  [s] Skip voiceover\n  [q] Quit\nChoice: ").lower()
-
-            if choice == 'r':
-                return self.generate_voiceover(korean_script)  # Retry
-            elif choice == 's':
-                print("Skipping voiceover...")
-                return None
-            else:
-                print("Exiting...")
-                sys.exit(0)
+            print("\n✗ Exiting due to error (full automation mode - no retries)")
+            sys.exit(1)
 
     def generate_subtitles(self, korean_script: str) -> str:
         """Generate SRT subtitles from Korean script."""
@@ -896,9 +841,9 @@ PREMISE: [Korean translation]"""
         """Edit video using CapCut with FULL automation via PyAutoGUI."""
         print("\n=== STEP 8: Editing Video in CapCut (FULLY AUTOMATED) ===")
         print("Note: This will automatically control CapCut using your mouse/keyboard.")
-        print("Please do NOT touch your mouse or keyboard during automation!")
-        print("Ensure CapCut is CLOSED before continuing.")
-        input("Press Enter when ready to start FULL automation...")
+        print("⚠ DO NOT TOUCH YOUR MOUSE OR KEYBOARD! ⚠")
+        print("Starting in 5 seconds...")
+        time.sleep(5)
 
         # Get screen resolution automatically
         screen_width, screen_height = pyautogui.size()
