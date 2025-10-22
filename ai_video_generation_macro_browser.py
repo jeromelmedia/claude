@@ -1038,25 +1038,37 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
 
-IMPORTANT REQUIREMENTS:
-- Translate the COMPLETE script from beginning to end
+CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
+- Read the ENTIRE file from beginning to end
+- Translate EVERY sentence and paragraph
+- Do NOT stop early or truncate
+- The script should be approximately 6000-7000 words in English
+- Your Korean translation should be similarly long and complete
 - Maintain the storytelling style and dramatic tone
 - Keep all numbers, ages, and specific details accurate
 - Preserve the paragraph structure and formatting
 - Use natural, conversational Korean for seniors (60+)
 - Keep the same emotional impact and urgency
 
-JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
+JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL script."""
 
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=480,  # 8 minutes for full script translation (up from 6)
-            stabilization_wait=60,  # Much longer initial wait for large translation (up from 45)
-            max_stability_checks=40  # More checks for translation to ensure complete (up from 35)
+            wait_time=600,  # 10 minutes for full script translation (increased from 8)
+            stabilization_wait=90,  # Much longer initial wait for large translation (increased from 60)
+            max_stability_checks=50  # More checks for translation to ensure complete (increased from 40)
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
-        print(f"Script translated ({len(korean_script)} chars)\n")
+
+        # Show character count and word estimate
+        char_count = len(korean_script)
+        word_estimate = char_count // 2  # Korean characters are roughly 2 chars per word
+        print(f"Script translated: {char_count} chars (~{word_estimate} Korean chars)\n")
+
+        # Warning if translation seems too short
+        if char_count < 15000:
+            print(f"⚠ WARNING: Translation seems short ({char_count} chars). Expected ~20,000+ for full script.\n")
 
         return korean_script
 
@@ -1445,21 +1457,34 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             # Step 4: Add subtitles
             print("[4/6] Burning subtitles...")
 
-            # Windows path fix for subtitles - properly escape for FFmpeg filter syntax
-            subtitle_path_fixed = str(Path(subtitle_path).absolute()).replace('\\', '/')
-            subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\\\:')
-            # Escape spaces for FFmpeg filter syntax on Windows
-            subtitle_path_fixed = subtitle_path_fixed.replace(' ', '\\\\ ')
+            # Use a different approach: copy subtitles to working dir with simple name to avoid path escaping issues
+            simple_subtitle_path = working_dir / "subs.srt"
+            import shutil
+            shutil.copy(subtitle_path, simple_subtitle_path)
 
-            subtitle_cmd = [
-                'ffmpeg', '-y',
-                '-i', str(temp_concatenated),
-                '-vf', f"subtitles='{subtitle_path_fixed}':force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'",
-                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
-                '-c:a', 'copy',
-                str(temp_with_subs)
-            ]
-            subprocess.run(subtitle_cmd, capture_output=True, check=True)
+            # For FFmpeg filter syntax, we need to escape special characters
+            # Using a simple filename avoids Windows path escaping issues entirely
+            subtitle_filter = f"subtitles={simple_subtitle_path.name}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'"
+
+            # Run FFmpeg from the working directory so it can find the subtitle file
+            import os
+            original_cwd = os.getcwd()
+            os.chdir(working_dir)
+
+            try:
+                subtitle_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(temp_concatenated.absolute()),
+                    '-vf', subtitle_filter,
+                    '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                    '-c:a', 'copy',
+                    str(temp_with_subs.absolute())
+                ]
+                subprocess.run(subtitle_cmd, capture_output=True, check=True)
+            finally:
+                os.chdir(original_cwd)
+                # Clean up temporary subtitle copy
+                simple_subtitle_path.unlink(missing_ok=True)
 
             # Step 5: Add voiceover
             print("[5/6] Adding voiceover...")
@@ -1576,14 +1601,21 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
             print(f"\nOutput folder: {self.working_dir}")
 
-            # Save English content
+            # Save English title
+            title_path = self.working_dir / "video_title_english.txt"
+            with open(title_path, 'w', encoding='utf-8') as f:
+                f.write(english_title)
+
+            # Save English description
+            description_path = self.working_dir / "video_description_english.txt"
+            with open(description_path, 'w', encoding='utf-8') as f:
+                f.write(english_description)
+
+            # Save English script (ONLY the script, no title/description)
             script_path = self.working_dir / "video_script_english.txt"
             with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {english_title}\n\n")
-                f.write(f"Description: {english_description}\n\n")
-                f.write(f"Premise: {english_premise}\n\n")
-                f.write(f"Script:\n{english_script}")
-            print(f"English script saved\n")
+                f.write(english_script)
+            print(f"English files saved\n")
 
             # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
             print("="*50)
@@ -1620,12 +1652,10 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             with open(korean_description_path, 'w', encoding='utf-8') as f:
                 f.write(korean_description)
 
-            # Save Korean content (title, description, and script combined)
+            # Save Korean script (ONLY the script, no title/description)
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {korean_title}\n\n")
-                f.write(f"Description: {korean_description}\n\n")
-                f.write(f"Script:\n{korean_script}")
+                f.write(korean_script)
             print(f"Korean files saved\n")
 
             # === CLOSE BROWSER ===
