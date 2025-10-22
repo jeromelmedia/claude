@@ -85,13 +85,41 @@ class VideoGenerationMacroBrowser:
             self.driver = webdriver.Chrome(options=chrome_options)
             print("✓ Browser initialized")
         except Exception as e:
-            print(f"\n✗ Failed to initialize Chrome: {e}")
-            print("\nTroubleshooting:")
-            print("1. Make sure Chrome is installed")
-            print("2. Close the automation browser if it's already open")
-            print("3. Update Chrome to latest version")
-            print("4. Try: pip install --upgrade selenium")
-            raise
+            error_msg = str(e)
+
+            if "user data directory is already in use" in error_msg.lower():
+                print(f"\n✗ Chrome automation profile is already in use!")
+                print("\n⚠️  SOLUTION: Close the automation browser window and try again.")
+                print("\nLook for a Chrome window that was opened by this script and close it.")
+                print("Then run the script again.")
+
+                # Try to kill Chrome processes using this profile (Windows)
+                if sys.platform == 'win32':
+                    print("\nAttempting to close Chrome processes...")
+                    try:
+                        subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'],
+                                     capture_output=True, timeout=5)
+                        print("✓ Chrome processes closed. Please wait 5 seconds...")
+                        time.sleep(5)
+
+                        # Retry once
+                        print("Retrying browser initialization...")
+                        self.driver = webdriver.Chrome(options=chrome_options)
+                        print("✓ Browser initialized successfully!")
+                        return
+                    except:
+                        pass
+
+                print("\nIf the problem persists, restart your computer.")
+                raise
+            else:
+                print(f"\n✗ Failed to initialize Chrome: {e}")
+                print("\nTroubleshooting:")
+                print("1. Make sure Chrome is installed")
+                print("2. Close ALL Chrome windows")
+                print("3. Update Chrome to latest version")
+                print("4. Try: pip install --upgrade selenium")
+                raise
 
     def navigate_to_project(self):
         """Navigate to Claude.ai Project"""
