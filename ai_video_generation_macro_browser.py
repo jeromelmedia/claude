@@ -748,13 +748,19 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
                 continue
 
-    def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
+    def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int, character_name: str = None) -> str:
         """Generate one segment of the script using Claude.ai Project"""
+
+        # Build doctor name instruction
+        doctor_name_instruction = ""
+        if character_name:
+            doctor_name_instruction = f"\n\nDOCTOR NAME - CRITICAL:\nThe doctor's name is '{character_name}'. Use this EXACT name in the script. Do NOT use any other name."
 
         prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
 
 Title: "{title}"
 Premise: {premise}
+{doctor_name_instruction}
 
 Target: {6500 // total_segments} words for this segment
 
@@ -813,7 +819,7 @@ JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segmen
 
         for i in range(1, num_segments + 1):
             print(f"\nGenerating segment {i}/{num_segments}...")
-            segment = self.generate_script_segment_browser(title, premise, i, num_segments)
+            segment = self.generate_script_segment_browser(title, premise, i, num_segments, self.character_name)
             segments.append(segment)
 
             word_count = len(segment.split())
