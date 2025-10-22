@@ -660,6 +660,13 @@ REQUIREMENTS:
 - Use emotional hooks
 - End with strong call to action
 
+CRITICAL - NO FAKE QUOTES:
+- DO NOT make up patient quotes or testimonials
+- DO NOT include fabricated dialogue like "Mr. Song said..." or "Mrs. Kim told me..."
+- Focus on MEDICAL INFORMATION and facts only
+- You can reference general patient experiences without fake quotes
+- NO invented testimonials or made-up patient stories
+
 Write in English following that style.
 
 JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
@@ -682,6 +689,11 @@ JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
                 modify_prompt = f"""Current description: "{description}"
 
 User wants this change: {modification}
+
+CRITICAL - NO FAKE QUOTES:
+- DO NOT make up patient quotes or testimonials
+- DO NOT include fabricated dialogue
+- Focus on MEDICAL INFORMATION and facts only
 
 Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
@@ -769,15 +781,21 @@ SEGMENT FOCUS:
 
 WRITING STYLE - Match the Korean .txt script files in this project:
 - Use their dramatic storytelling style
-- Copy their structure (opening hooks, patient stories, expert credibility, solutions, timelines)
+- Copy their structure (opening hooks, expert credibility, solutions, timelines)
 - Match their tone for seniors (60+)
 - Include specific numbers, ages, measurements like they do
 - Use "you" language and conversational style
 - Scientific explanations in simple terms
 
+CRITICAL - NO FAKE QUOTES:
+- DO NOT make up patient quotes or testimonials
+- DO NOT include fabricated dialogue like "Mr. Song said..."
+- Focus on MEDICAL INFORMATION and facts only
+- You can reference general patient experiences without fake quotes
+- NO invented testimonials or made-up patient stories
+
 CRITICAL - KOREAN CONTEXT ONLY:
 - The doctor is from KOREA (not America)
-- ALL patient stories must be Korean patients with Korean names (Kim, Park, Lee, Choi, etc.)
 - ALL locations must be in Korea (Seoul, Busan, hospitals in Korea, etc.)
 - Use Korean cultural context and references
 - Mention Korean healthcare system when relevant
