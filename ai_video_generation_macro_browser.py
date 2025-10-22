@@ -171,16 +171,16 @@ class VideoGenerationMacroBrowser:
         """Generate video title using Claude.ai Project"""
         print("\n=== STEP 1: Generating Video Title (English) ===")
 
-        prompt = """Generate a compelling YouTube video title in English.
+        prompt = """DO NOT search or ask questions. Generate NOW.
 
-Requirements:
-- Follow the style and format from the reference files in this project
-- Make it attention-grabbing and clickable
-- Include numbers, urgency, or curiosity gaps if appropriate
-- Target audience: Korean seniors (60+)
-- Topics: Health, finance, lifestyle tips
+Create ONE compelling YouTube video title in English for Korean seniors (60+) about health topics.
 
-Output ONLY the title, nothing else."""
+Use this EXACT format pattern from your reference files:
+[Expert/Authority] Reveals [Specific Number] [Item/Solution] That [Dramatic Benefit] in [Timeframe]! [Accessibility Detail] | [Category Tags]
+
+Example structure: "Doctor Reveals the $5 Superfood That Reverses Artery Blockage in 90 Days! Available at Any Grocery Store | Senior Health"
+
+Generate the title RIGHT NOW. Do not explain, do not ask questions, JUST OUTPUT THE TITLE."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=60)
 
@@ -189,6 +189,13 @@ Output ONLY the title, nothing else."""
         # Remove any quotes or extra formatting
         title = title.strip('"\'')
 
+        # If response contains explanations, extract just the title
+        lines = title.split('\n')
+        for line in lines:
+            if '|' in line or 'Doctor' in line or 'Reveals' in line:
+                title = line.strip()
+                break
+
         print(f"\nGenerated English Title: {title}")
         return title
 
@@ -196,20 +203,22 @@ Output ONLY the title, nothing else."""
         """Generate video description using Claude.ai Project"""
         print("\n=== STEP 2: Generating Video Description (English) ===")
 
-        prompt = f"""Based on this video title: "{title}"
+        prompt = f"""DO NOT search or ask questions. Write the description NOW.
 
-Generate a compelling video description in English (2-4 sentences).
+Title: "{title}"
 
-Requirements:
-- Follow the style from the Korean video descriptions in the reference files
-- Create urgency and curiosity
-- Promise specific value/benefits
-- End with a call to action
+Write a 3-4 sentence video description in English following this pattern:
+1. Start with shocking statistic or urgent statement
+2. Promise specific solution with numbers/timeline
+3. Create curiosity about the method
+4. End with "Watch now to learn..." call to action
 
-Output ONLY the description, nothing else."""
+JUST OUTPUT THE DESCRIPTION. No explanations, no questions."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=60)
         description = response.strip()
+        # Remove quotes if present
+        description = description.strip('"\'')
 
         print(f"\nGenerated English Description: {description[:200]}...")
         return description
@@ -218,19 +227,20 @@ Output ONLY the description, nothing else."""
         """Generate video premise using Claude.ai Project"""
         print("\n=== STEP 3: Generating Video Premise (English) ===")
 
-        prompt = f"""Based on this video title: "{title}"
+        prompt = f"""DO NOT search. Write the premise NOW.
 
-Generate a video premise in English (2-3 sentences).
+Title: "{title}"
 
-The premise should:
-- Explain what the video is about
-- Set up the main points/benefits
-- Create anticipation for the full script
+Write 2-3 sentences that:
+- Introduce the expert/authority (e.g., "A renowned cardiologist with 30 years of experience...")
+- State the main discovery/solution with specifics
+- Preview the benefits viewers will learn
 
-Output ONLY the premise, nothing else."""
+JUST OUTPUT THE PREMISE. No explanations."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=60)
         premise = response.strip()
+        premise = premise.strip('"\'')
 
         print(f"\nGenerated English Premise: {premise[:200]}...")
         return premise
@@ -238,23 +248,26 @@ Output ONLY the premise, nothing else."""
     def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
         """Generate one segment of the script using Claude.ai Project"""
 
-        prompt = f"""Based on this video:
+        prompt = f"""DO NOT search. Write segment {segment_num} NOW.
+
 Title: "{title}"
 Premise: {premise}
 
-Generate segment {segment_num} of {total_segments} for the full video script.
+Write script segment {segment_num} of {total_segments} ({6500 // total_segments} words).
 
-Requirements:
-- Follow the EXACT writing style from the reference scripts in this project
-- Target length: {6500 // total_segments} words for this segment
-- Write in a conversational, engaging Korean senior-friendly style
-- Include storytelling, examples, specific numbers and facts
-- Match the tone, structure, and hooks from the reference files
-
-This is segment {segment_num}/{total_segments}, so focus on:
+REQUIRED ELEMENTS FOR THIS SEGMENT:
 {self._get_segment_focus(segment_num, total_segments)}
 
-Output ONLY the script segment in English, nothing else."""
+WRITING STYLE (match your reference scripts):
+- Dramatic opening with real emergency story
+- Expert credibility (25-40 years experience)
+- Patient case studies with SPECIFIC details (ages, timelines, measurements)
+- Conversational tone for seniors
+- Lots of "you" language
+- Scientific explanations in simple terms
+- Specific numbers and timelines
+
+JUST WRITE THE SCRIPT. No explanations, no questions."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=120)
         return response.strip()
@@ -332,18 +345,13 @@ Generate the ADDITIONAL content only:"""
         """Translate text to Korean using Claude.ai Project"""
         print(f"\nTranslating {content_type} to Korean...")
 
-        prompt = f"""Translate this English text to Korean.
+        prompt = f"""DO NOT explain. Translate NOW.
 
-Requirements:
-- Natural, fluent Korean that sounds native
-- Appropriate for Korean seniors (60+)
-- Maintain the tone and style
-- Keep any numbers, names, or specific terms accurate
+Translate to natural Korean for seniors (60+):
 
-English text:
 {text}
 
-Output ONLY the Korean translation, nothing else."""
+JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=90)
         return response.strip()
