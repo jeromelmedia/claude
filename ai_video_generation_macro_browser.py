@@ -575,7 +575,7 @@ class VideoGenerationMacroBrowser:
         print("\n=== STEP 1: Generating Video Title (English) ===")
 
         while True:
-            prompt = """Generate a YouTube video title in English.
+            prompt = """Generate a YouTube video title in ENGLISH ONLY.
 
 Use the "korean video titles.txt" file in this project as reference for:
 - Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
@@ -585,9 +585,15 @@ Use the "korean video titles.txt" file in this project as reference for:
 
 The host is a DOCTOR, so focus on health and lifestyle topics only.
 
+CRITICAL - OUTPUT LANGUAGE:
+- Generate the title in ENGLISH, NOT Korean
+- The Korean titles file is just for reference on style/topics
+- Do NOT translate or output Korean text
+- Output must be 100% English language
+
 Create ONE title in English following that style.
 
-JUST OUTPUT THE TITLE. No explanations."""
+JUST OUTPUT THE TITLE IN ENGLISH. No explanations, no Korean."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
 
@@ -618,7 +624,9 @@ JUST OUTPUT THE TITLE. No explanations."""
 
 User wants this change: {modification}
 
-Generate the modified title. JUST OUTPUT THE NEW TITLE."""
+CRITICAL: Generate the modified title in ENGLISH ONLY, not Korean.
+
+Generate the modified title. JUST OUTPUT THE NEW TITLE IN ENGLISH."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 title = self.extract_generated_content(response)
@@ -667,9 +675,13 @@ CRITICAL - NO FAKE QUOTES:
 - You can reference general patient experiences without fake quotes
 - NO invented testimonials or made-up patient stories
 
-Write in English following that style.
+CRITICAL - OUTPUT LANGUAGE:
+- Generate the description in ENGLISH ONLY, NOT Korean
+- The Korean descriptions file is just for reference on style/format
+- Do NOT translate or output Korean text
+- Output must be 100% English language
 
-JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
+JUST OUTPUT THE DESCRIPTION IN ENGLISH. Make it DETAILED and COMPREHENSIVE."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
             description = self.extract_generated_content(response, extract_all=True)  # Get full description, not just last line
@@ -695,7 +707,9 @@ CRITICAL - NO FAKE QUOTES:
 - DO NOT include fabricated dialogue
 - Focus on MEDICAL INFORMATION and facts only
 
-Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
+CRITICAL: Generate the modified description in ENGLISH ONLY, not Korean.
+
+Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION IN ENGLISH."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 description = self.extract_generated_content(response, extract_all=True)  # Get full description, not just last line
@@ -718,12 +732,14 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
         while True:
             prompt = f"""Generate a video premise based on this title: "{title}"
 
-Write 2-3 sentences in English that:
+Write 2-3 sentences in ENGLISH ONLY that:
 - Introduce the expert/authority with years of experience
 - State the main discovery/solution with specific details
 - Preview the key benefits viewers will learn
 
-JUST OUTPUT THE PREMISE."""
+CRITICAL: Generate in ENGLISH ONLY, not Korean.
+
+JUST OUTPUT THE PREMISE IN ENGLISH."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
             premise = self.extract_generated_content(response)
@@ -744,7 +760,9 @@ JUST OUTPUT THE PREMISE."""
 
 User wants this change: {modification}
 
-Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
+CRITICAL: Generate the modified premise in ENGLISH ONLY, not Korean.
+
+Generate the modified premise. JUST OUTPUT THE NEW PREMISE IN ENGLISH."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 premise = self.extract_generated_content(response)
@@ -801,6 +819,12 @@ CRITICAL - KOREAN CONTEXT ONLY:
 - Mention Korean healthcare system when relevant
 - NO American names, cities, or locations
 - The doctor practices in Korea and treats Korean patients
+
+CRITICAL - OUTPUT LANGUAGE:
+- Write the script in ENGLISH ONLY, NOT Korean
+- The Korean script files are just for reference on style/tone
+- Do NOT translate or output Korean text
+- Output must be 100% English language
 
 JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
