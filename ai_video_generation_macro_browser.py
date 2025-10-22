@@ -1429,14 +1429,17 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             # Step 4: Add subtitles
             print("  [4/6] Burning in subtitles...")
 
-            # Windows path fix for subtitles
-            subtitle_path_fixed = str(Path(subtitle_path).absolute()).replace('\\', '/')
-            subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\\\:')
+            # Windows path fix for subtitles - use forward slashes and escape colon
+            # Convert to absolute path, then forward slashes (works on Windows FFmpeg)
+            subtitle_path_abs = str(Path(subtitle_path).absolute())
+            subtitle_path_fixed = subtitle_path_abs.replace('\\', '/')
+            # Escape the colon in drive letter (C: becomes C\:)
+            subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\:')
 
             subtitle_cmd = [
                 'ffmpeg', '-y',
                 '-i', str(temp_concatenated),
-                '-vf', f"subtitles='{subtitle_path_fixed}':force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'",
+                '-vf', f"subtitles={subtitle_path_fixed}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'",
                 '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                 '-c:a', 'copy',
                 str(temp_with_subs)
@@ -1570,14 +1573,30 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             print(f"\n✓ Created output folder: {self.working_dir}")
             print("   All files for this video will be saved here.")
 
-            # Save English content
+            # Save English content - separate files for each
+            # 1. Save ONLY the script (for upload to Claude)
             script_path = self.working_dir / "video_script_english.txt"
             with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {english_title}\n\n")
-                f.write(f"Description: {english_description}\n\n")
-                f.write(f"Premise: {english_premise}\n\n")
-                f.write(f"Script:\n{english_script}")
+                f.write(english_script)
             print(f"✓ English script saved to: {script_path}")
+
+            # 2. Save ONLY the title
+            title_path = self.working_dir / "video_title_english.txt"
+            with open(title_path, 'w', encoding='utf-8') as f:
+                f.write(english_title)
+            print(f"✓ English title saved to: {title_path}")
+
+            # 3. Save ONLY the description
+            description_path = self.working_dir / "video_description_english.txt"
+            with open(description_path, 'w', encoding='utf-8') as f:
+                f.write(english_description)
+            print(f"✓ English description saved to: {description_path}")
+
+            # 4. Save premise separately (internal use only)
+            premise_path = self.working_dir / "video_premise_english.txt"
+            with open(premise_path, 'w', encoding='utf-8') as f:
+                f.write(english_premise)
+            print(f"✓ English premise saved to: {premise_path}")
 
             # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
             print("\n" + "="*60)
