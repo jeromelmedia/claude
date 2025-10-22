@@ -917,31 +917,101 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
         response = self.send_prompt_and_wait(prompt, wait_time=90)
         return response.strip()
 
-    def translate_script_to_korean_browser(self, english_script: str) -> str:
-        """Translate full script to Korean in chunks"""
+    def translate_script_to_korean_browser(self, script_file_path: str) -> str:
+        """Translate full script to Korean using uploaded file"""
         print("\n=== Translating Full Script to Korean ===")
-        print("This may take a few minutes...")
+        print("Using uploaded script file for translation...")
 
-        # Split into chunks of ~1500 words
-        words = english_script.split()
-        chunk_size = 1500
-        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+        prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
 
-        korean_chunks = []
+IMPORTANT REQUIREMENTS:
+- Translate the COMPLETE script from beginning to end
+- Maintain the storytelling style and dramatic tone
+- Keep all numbers, ages, and specific details accurate
+- Preserve the paragraph structure and formatting
+- Use natural, conversational Korean for seniors (60+)
+- Keep the same emotional impact and urgency
 
-        for i, chunk in enumerate(chunks, 1):
-            print(f"Translating chunk {i}/{len(chunks)}...")
-            korean_chunk = self.translate_to_korean_browser(chunk, f"chunk {i}")
-            korean_chunks.append(korean_chunk)
+JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
-            if i < len(chunks):
-                print("⏱ Waiting 10 seconds...")
-                time.sleep(10)
+        print("Sending translation request to Claude...")
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=300,  # 5 minutes for full script translation
+            stabilization_wait=40,  # Extra long wait for large translation
+            max_stability_checks=25  # More checks for translation
+        )
 
-        korean_script = "\n\n".join(korean_chunks)
-        print("✓ Script translated to Korean")
+        korean_script = self.extract_generated_content(response, extract_all=True)
+
+        print(f"✓ Script translated to Korean ({len(korean_script)} characters)")
 
         return korean_script
+
+    def upload_file_to_project(self, file_path: str) -> bool:
+        """Upload a file to the Claude.ai Project"""
+        try:
+            print(f"\n📤 Uploading {Path(file_path).name} to Claude Project...")
+
+            # Look for the file upload button/icon
+            # Try multiple methods to find and click upload
+            upload_selectors = [
+                "button[aria-label*='upload' i]",
+                "button[aria-label*='attach' i]",
+                "input[type='file']",
+                "button:has(svg[class*='paperclip'])",
+                "button:has(svg[class*='upload'])"
+            ]
+
+            upload_element = None
+            for selector in upload_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    upload_element = elements[0]
+                    print(f"  Found upload element with selector: {selector}")
+                    break
+
+            if not upload_element:
+                print("  ⚠ Could not find upload button, trying file input directly...")
+                # Try to find hidden file input and use JavaScript
+                file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                if file_inputs:
+                    # Make it visible and interactable
+                    self.driver.execute_script("""
+                        arguments[0].style.display = 'block';
+                        arguments[0].style.visibility = 'visible';
+                        arguments[0].style.opacity = '1';
+                    """, file_inputs[0])
+                    upload_element = file_inputs[0]
+
+            if upload_element:
+                # If it's a file input, send the file path directly
+                if upload_element.tag_name == 'input':
+                    abs_path = str(Path(file_path).absolute())
+                    upload_element.send_keys(abs_path)
+                    print(f"  ✓ File uploaded: {Path(file_path).name}")
+                else:
+                    # If it's a button, click it first then find the file input
+                    upload_element.click()
+                    time.sleep(1)
+                    file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                    if file_inputs:
+                        abs_path = str(Path(file_path).absolute())
+                        file_inputs[0].send_keys(abs_path)
+                        print(f"  ✓ File uploaded: {Path(file_path).name}")
+
+                # Wait for upload to complete
+                time.sleep(5)
+                return True
+            else:
+                print("  ✗ Could not find upload mechanism")
+                return False
+
+        except Exception as e:
+            print(f"  ✗ Error uploading file: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     # === CHARACTER SELECTION ===
 
@@ -1446,6 +1516,18 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
                 f.write(f"Script:\n{english_script}")
             print(f"✓ English script saved to: {script_path}")
 
+            # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
+            print("\n" + "="*60)
+            print("📤 UPLOADING SCRIPT TO CLAUDE PROJECT")
+            print("="*60)
+
+            upload_success = self.upload_file_to_project(str(script_path))
+            if upload_success:
+                print("✓ Script uploaded successfully - ready for translation")
+                time.sleep(3)  # Wait for upload to fully process
+            else:
+                print("⚠ Upload failed - will attempt translation without file reference")
+
             # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
             print("\n" + "="*60)
             print("🌐 PHASE 2: TRANSLATE ALL CONTENT TO KOREAN (Browser)")
@@ -1460,7 +1542,8 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             korean_premise = self.translate_to_korean_browser(english_premise, "premise")
             time.sleep(5)
 
-            korean_script = self.translate_script_to_korean_browser(english_script)
+            # Translate full script using uploaded file (not chunks)
+            korean_script = self.translate_script_to_korean_browser(str(script_path))
 
             # Save Korean content
             korean_script_path = self.working_dir / "video_script_korean.txt"
