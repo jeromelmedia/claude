@@ -440,6 +440,73 @@ class VideoGenerationMacroBrowser:
             traceback.print_exc()
             return ""
 
+    def extract_generated_content(self, response: str) -> str:
+        """
+        Extract the actual generated content from Claude's response,
+        filtering out thinking, searching, and explanatory text.
+        """
+        # Remove common Claude prefixes/explanations
+        lines = response.split('\n')
+
+        # Filter out lines that are clearly Claude's internal process
+        skip_patterns = [
+            'I need to',
+            'I\'ll search',
+            'Let me',
+            'Searched project',
+            'Searching for',
+            'Based on',
+            'Here\'s',
+            'According to',
+            'I can see',
+            'Looking at',
+            'relevant sections',
+            'results'
+        ]
+
+        # Collect candidate lines (not process text)
+        candidates = []
+        for line in lines:
+            line_stripped = line.strip()
+
+            # Skip empty lines
+            if not line_stripped:
+                continue
+
+            # Skip lines that match process patterns
+            is_process = False
+            for pattern in skip_patterns:
+                if line_stripped.startswith(pattern):
+                    is_process = True
+                    break
+
+            if not is_process and len(line_stripped) > 15:
+                candidates.append(line_stripped)
+
+        # The actual content is usually the LAST substantial line
+        if candidates:
+            # Return the last candidate line
+            result = candidates[-1].strip('"\'')
+            print(f"  [DEBUG] Extracted from {len(candidates)} candidate lines")
+            return result
+
+        # Fallback: Look for content after common intro phrases
+        for intro in ['title:', 'here\'s an', 'here is', ':']:
+            if intro in response.lower():
+                parts = response.lower().split(intro)
+                if len(parts) > 1:
+                    # Get everything after the intro phrase
+                    content = response[response.lower().index(intro) + len(intro):].strip()
+                    # Get first line of that
+                    first_line = content.split('\n')[0].strip().strip('"\'')
+                    if first_line:
+                        print(f"  [DEBUG] Extracted after intro phrase '{intro}'")
+                        return first_line
+
+        # Last resort: Return the whole response cleaned up
+        print(f"  [DEBUG] Using full response as fallback")
+        return response.strip().strip('"\'')
+
     def generate_title_browser(self) -> str:
         """Generate video title using Claude.ai Project with approval loop"""
         print("\n=== STEP 1: Generating Video Title (English) ===")
@@ -459,18 +526,12 @@ JUST OUTPUT THE TITLE. No explanations."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
 
-            print(f"  [DEBUG] Raw response received: '{response[:200]}...'")
-            print(f"  [DEBUG] Response length: {len(response)} characters")
+            print(f"  [DEBUG] Raw response received ({len(response)} chars)")
+            print(f"  [DEBUG] First 300 chars: '{response[:300]}...'")
+            print(f"  [DEBUG] Last 300 chars: '...{response[-300:]}'")
 
-            # Clean up the response
-            title = response.strip().strip('"\'')
-
-            # Extract title if embedded in explanation
-            lines = title.split('\n')
-            for line in lines:
-                if line.strip() and ('"' in line or len(line) > 20):
-                    title = line.strip().strip('"\'')
-                    break
+            # Parse the response to extract JUST the title (not Claude's thinking/searching)
+            title = self.extract_generated_content(response)
 
             print(f"\n📋 Generated Title:\n{title}\n")
             print(f"  [DEBUG] Final title after processing: '{title}'")
@@ -495,7 +556,7 @@ User wants this change: {modification}
 Generate the modified title. JUST OUTPUT THE NEW TITLE."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                title = response.strip().strip('"\'')
+                title = self.extract_generated_content(response)
                 print(f"\n📋 Modified Title:\n{title}\n")
 
                 # Ask for approval again
@@ -529,7 +590,7 @@ Write 2-4 sentences in English following that style.
 JUST OUTPUT THE DESCRIPTION."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
-            description = response.strip().strip('"\'')
+            description = self.extract_generated_content(response)
 
             print(f"\n📋 Generated Description:\n{description}\n")
 
@@ -550,7 +611,7 @@ User wants this change: {modification}
 Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                description = response.strip().strip('"\'')
+                description = self.extract_generated_content(response)
                 print(f"\n📋 Modified Description:\n{description}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
@@ -578,7 +639,7 @@ Write 2-3 sentences in English that:
 JUST OUTPUT THE PREMISE."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
-            premise = response.strip().strip('"\'')
+            premise = self.extract_generated_content(response)
 
             print(f"\n📋 Generated Premise:\n{premise}\n")
 
@@ -599,7 +660,7 @@ User wants this change: {modification}
 Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                premise = response.strip().strip('"\'')
+                premise = self.extract_generated_content(response)
                 print(f"\n📋 Modified Premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
