@@ -143,46 +143,76 @@ class VideoGenerationMacroBrowser:
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60) -> str:
         """Send a prompt to Claude and wait for response"""
         try:
-            # Retry logic for stale elements
+            # Retry logic for DOM issues
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    # Find chat input (re-find each attempt to avoid stale reference)
+                    # Find chat input
                     print(f"  Finding chat input (attempt {attempt + 1}/{max_retries})...")
                     chat_input = WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
                     )
-                    time.sleep(1)  # Let DOM settle
+                    time.sleep(1)
 
                     # Click to focus
                     print(f"  Focusing input...")
                     chat_input.click()
                     time.sleep(0.5)
 
-                    # Clear the input using keyboard shortcuts
-                    print(f"  Clearing input...")
-                    chat_input.send_keys(Keys.CONTROL + "a")  # Select all
-                    time.sleep(0.3)
-                    chat_input.send_keys(Keys.BACKSPACE)  # Delete
-                    time.sleep(0.5)
+                    # Use JavaScript to set the text content directly (much more reliable than typing)
+                    print(f"  Setting prompt text via JavaScript ({len(prompt)} chars)...")
+                    # Escape single quotes in the prompt for JavaScript
+                    escaped_prompt = prompt.replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
 
-                    # Type prompt character by character to avoid stale references
-                    print(f"  Typing prompt ({len(prompt)} chars)...")
-                    # Split into smaller chunks to reduce stale element risk
-                    chunk_size = 100
-                    for i in range(0, len(prompt), chunk_size):
-                        chunk = prompt[i:i+chunk_size]
-                        # Re-find element before each chunk
-                        chat_input = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true']")
-                        chat_input.send_keys(chunk)
-                        time.sleep(0.1)
+                    # Set the text content using JavaScript
+                    js_script = f"""
+                    var element = arguments[0];
+                    element.textContent = '{escaped_prompt}';
 
+                    // Trigger input event to notify React/Vue that content changed
+                    var event = new Event('input', {{ bubbles: true }});
+                    element.dispatchEvent(event);
+                    """
+
+                    self.driver.execute_script(js_script, chat_input)
                     time.sleep(1)
 
-                    # Re-find element before sending (most critical step)
+                    # Now send the message - try both keyboard and button click
                     print(f"  Sending message...")
-                    chat_input = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true']")
-                    chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
+
+                    # Method 1: Try keyboard shortcut
+                    try:
+                        chat_input.click()
+                        time.sleep(0.3)
+                        chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
+                        print(f"  Sent via keyboard (Ctrl+Enter)")
+                    except:
+                        # Method 2: Find and click the send button
+                        print(f"  Keyboard send failed, trying button click...")
+                        try:
+                            # Look for send button (various possible selectors)
+                            send_button = None
+                            button_selectors = [
+                                "button[aria-label*='Send']",
+                                "button[type='submit']",
+                                "button:has(svg)",  # Send buttons often have SVG icons
+                                "button[class*='send']"
+                            ]
+
+                            for selector in button_selectors:
+                                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                if buttons:
+                                    send_button = buttons[-1]  # Usually the last one
+                                    break
+
+                            if send_button:
+                                send_button.click()
+                                print(f"  Sent via button click")
+                            else:
+                                print(f"  ⚠ Could not find send button, message may not have been sent")
+                        except Exception as e:
+                            print(f"  ⚠ Button click also failed: {e}")
+
                     time.sleep(2)
 
                     # If we got here, we succeeded
@@ -190,12 +220,13 @@ class VideoGenerationMacroBrowser:
                     break
 
                 except Exception as e:
-                    if "stale element" in str(e).lower() and attempt < max_retries - 1:
-                        print(f"  ⚠ Stale element, retrying... ({attempt + 1}/{max_retries})")
+                    error_msg = str(e).lower()
+                    if ("stale element" in error_msg or "no such element" in error_msg) and attempt < max_retries - 1:
+                        print(f"  ⚠ Element issue, retrying... ({attempt + 1}/{max_retries})")
                         time.sleep(2)
                         continue
                     else:
-                        raise  # Re-raise if not stale or out of retries
+                        raise  # Re-raise if not a retryable error or out of retries
 
             # Wait for response to start appearing
             print(f"  Waiting for Claude to start generating...")
