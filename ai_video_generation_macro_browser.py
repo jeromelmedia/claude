@@ -926,8 +926,24 @@ Generate the ADDITIONAL content only:"""
 
         # Show preview and get approval
         while True:
-            print("\nScript Preview (first 500 characters):")
-            print(full_script[:500] + "...\n")
+            print("\nScript Preview (start and end):")
+
+            # Split into sentences and show first + last
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', full_script)
+            sentences = [s.strip() for s in sentences if s.strip()]
+
+            # Get first 3 and last 3 sentences
+            num_preview_sentences = 3
+            if len(sentences) > num_preview_sentences * 2:
+                first_sentences = ' '.join(sentences[:num_preview_sentences])
+                last_sentences = ' '.join(sentences[-num_preview_sentences:])
+                print(f"{first_sentences}")
+                print("\n[... middle of script ...]\n")
+                print(f"{last_sentences}\n")
+            else:
+                # If script is short, just show it all
+                print(full_script + "\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
 

@@ -452,11 +452,28 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
-        # Show preview
+        # Show preview - first and last sentences
         print("\n" + "=" * 60)
-        print("SCRIPT PREVIEW (first 500 characters):")
+        print("SCRIPT PREVIEW (start and end):")
         print("=" * 60)
-        print(full_script[:500] + "...")
+
+        # Split into sentences (simple approach - split on . ! ?)
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', full_script)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # Get first 3 and last 3 sentences
+        num_preview_sentences = 3
+        if len(sentences) > num_preview_sentences * 2:
+            first_sentences = ' '.join(sentences[:num_preview_sentences])
+            last_sentences = ' '.join(sentences[-num_preview_sentences:])
+            print(f"{first_sentences}")
+            print("\n[... middle of script ...]\n")
+            print(f"{last_sentences}")
+        else:
+            # If script is short, just show it all
+            print(full_script)
+
         print("=" * 60)
         print(f"\n✓ Auto-approved (running in full automation mode)")
 
