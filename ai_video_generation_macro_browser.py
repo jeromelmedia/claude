@@ -159,8 +159,21 @@ class VideoGenerationMacroBrowser:
                     )
                     time.sleep(1)
 
-                    # Click to focus
-                    chat_input.click()
+                    # Click to focus - try JavaScript if regular click is intercepted
+                    try:
+                        chat_input.click()
+                    except Exception as click_error:
+                        # Click intercepted - try to close any overlays by pressing Escape
+                        if "intercepted" in str(click_error).lower():
+                            try:
+                                self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                                time.sleep(0.5)
+                            except:
+                                pass
+                            # Use JavaScript to click instead
+                            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", chat_input)
+                        else:
+                            raise
                     time.sleep(0.5)
 
                     # Use JavaScript to set the text content directly (much more reliable than typing)
@@ -790,8 +803,23 @@ Generate the ADDITIONAL content only:"""
         if total_words > 7000:
             print(f"Trimming to ~7000 words...")
             words = full_script.split()
-            full_script = " ".join(words[:7000])
-            total_words = 7000
+            trimmed_text = " ".join(words[:7000])
+
+            # Find the last complete sentence (ending with . ! or ?)
+            last_period = max(
+                trimmed_text.rfind('.'),
+                trimmed_text.rfind('!'),
+                trimmed_text.rfind('?')
+            )
+
+            if last_period > 0:
+                # Keep text up to and including the sentence-ending punctuation
+                full_script = trimmed_text[:last_period + 1]
+                total_words = len(full_script.split())
+            else:
+                # Fallback: just use 7000 words if no sentence ending found
+                full_script = trimmed_text
+                total_words = 7000
 
         print(f"\nFinal script: {total_words} words")
 
