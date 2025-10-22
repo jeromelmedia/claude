@@ -58,7 +58,7 @@ class VideoGenerationMacroBrowser:
 
     def init_browser(self):
         """Initialize Chrome browser with persistent profile for automation"""
-        print("\n🌐 Initializing browser...")
+        print("\nInitializing browser...")
 
         chrome_options = Options()
 
@@ -66,9 +66,6 @@ class VideoGenerationMacroBrowser:
         # This keeps you logged in between runs WITHOUT conflicting with your main Chrome
         automation_profile_dir = Path("./chrome_automation_profile").absolute()
         automation_profile_dir.mkdir(exist_ok=True)
-
-        print(f"Using automation profile: {automation_profile_dir}")
-        print("(This keeps you logged in between runs)")
 
         # Use the dedicated profile directory
         chrome_options.add_argument(f"user-data-dir={automation_profile_dir}")
@@ -84,7 +81,7 @@ class VideoGenerationMacroBrowser:
 
         try:
             self.driver = webdriver.Chrome(options=chrome_options)
-            print("✓ Browser initialized")
+            print("Browser ready")
         except Exception as e:
             error_msg = str(e)
 
@@ -124,7 +121,7 @@ class VideoGenerationMacroBrowser:
 
     def navigate_to_project(self):
         """Navigate to Claude.ai Project"""
-        print(f"\n📂 Opening Claude Project...")
+        print("\nOpening Claude Project...")
         self.driver.get(self.project_url)
         time.sleep(5)  # Wait for page load
 
@@ -134,11 +131,10 @@ class VideoGenerationMacroBrowser:
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
             )
-            print("✓ Successfully loaded project")
+            print("Project loaded\n")
         except TimeoutException:
-            print("\n⚠ Not logged in to Claude.ai")
-            print("Please log in manually in the browser window...")
-            print("Press Enter once you're logged in and see the chat interface")
+            print("\nNot logged in - please log in manually in the browser window")
+            print("Press Enter once you see the chat interface")
             input()
 
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
@@ -158,19 +154,29 @@ class VideoGenerationMacroBrowser:
             for attempt in range(max_retries):
                 try:
                     # Find chat input
-                    print(f"  Finding chat input (attempt {attempt + 1}/{max_retries})...")
                     chat_input = WebDriverWait(self.driver, 10).until(
                         EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
                     )
                     time.sleep(1)
 
-                    # Click to focus
-                    print(f"  Focusing input...")
-                    chat_input.click()
+                    # Click to focus - try JavaScript if regular click is intercepted
+                    try:
+                        chat_input.click()
+                    except Exception as click_error:
+                        # Click intercepted - try to close any overlays by pressing Escape
+                        if "intercepted" in str(click_error).lower():
+                            try:
+                                self.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+                                time.sleep(0.5)
+                            except:
+                                pass
+                            # Use JavaScript to click instead
+                            self.driver.execute_script("arguments[0].focus(); arguments[0].click();", chat_input)
+                        else:
+                            raise
                     time.sleep(0.5)
 
                     # Use JavaScript to set the text content directly (much more reliable than typing)
-                    print(f"  Setting prompt text via JavaScript ({len(prompt)} chars)...")
                     # Escape single quotes in the prompt for JavaScript
                     escaped_prompt = prompt.replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
 
@@ -188,17 +194,13 @@ class VideoGenerationMacroBrowser:
                     time.sleep(1)
 
                     # Now send the message - try both keyboard and button click
-                    print(f"  Sending message...")
-
                     # Method 1: Try keyboard shortcut
                     try:
                         chat_input.click()
                         time.sleep(0.3)
                         chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
-                        print(f"  Sent via keyboard (Ctrl+Enter)")
                     except:
                         # Method 2: Find and click the send button
-                        print(f"  Keyboard send failed, trying button click...")
                         try:
                             # Look for send button (various possible selectors)
                             send_button = None
@@ -217,33 +219,25 @@ class VideoGenerationMacroBrowser:
 
                             if send_button:
                                 send_button.click()
-                                print(f"  Sent via button click")
-                            else:
-                                print(f"  ⚠ Could not find send button, message may not have been sent")
-                        except Exception as e:
-                            print(f"  ⚠ Button click also failed: {e}")
+                        except:
+                            pass
 
                     time.sleep(2)
-
-                    # If we got here, we succeeded
-                    print(f"  ✓ Message sent successfully")
                     break
 
                 except Exception as e:
                     error_msg = str(e).lower()
                     if ("stale element" in error_msg or "no such element" in error_msg) and attempt < max_retries - 1:
-                        print(f"  ⚠ Element issue, retrying... ({attempt + 1}/{max_retries})")
                         time.sleep(2)
                         continue
                     else:
                         raise  # Re-raise if not a retryable error or out of retries
 
             # Wait for response to start appearing
-            print(f"  Waiting for Claude to start generating...")
+            print("  Waiting for response...")
             time.sleep(3)
 
             # Wait for "Stop generating" button to disappear (indicates completion)
-            print(f"  Monitoring generation progress (max {wait_time}s)...")
             max_wait = wait_time
             start_time = time.time()
             generation_detected = False
@@ -254,35 +248,25 @@ class VideoGenerationMacroBrowser:
                     stop_button = self.driver.find_elements(By.XPATH, "//button[contains(., 'Stop')]")
 
                     if stop_button and not generation_detected:
-                        print(f"  ⏳ Claude is generating...")
                         generation_detected = True
 
                     if not stop_button and generation_detected:
-                        # Stop button disappeared - but wait to make sure it's REALLY done
-                        print(f"  ✓ Stop button disappeared, waiting to ensure completion...")
                         break
                     elif not stop_button and not generation_detected:
                         # Check if response already appeared (fast response)
                         messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
                         if len(messages) > 0:
-                            print(f"  ✓ Response detected!")
                             break
                 except:
                     pass
 
-                elapsed = int(time.time() - start_time)
-                if elapsed % 10 == 0 and elapsed > 0:  # Progress update every 10 seconds
-                    print(f"  ... still waiting ({elapsed}s elapsed)")
-
                 time.sleep(2)
 
             # CRITICAL: Wait for response to fully stabilize
-            # Claude may still be typing even after Stop button disappears
-            print(f"  ⏱️  Waiting for response to stabilize ({stabilization_wait} seconds)...")
+            print("  Stabilizing...")
             time.sleep(stabilization_wait)
 
             # Check if text is still changing (wait until stable)
-            print(f"  🔍 Verifying response stability (up to {max_stability_checks} checks)...")
             stable_count = 0
             last_text_length = 0
 
@@ -294,12 +278,9 @@ class VideoGenerationMacroBrowser:
 
                     if current_length == last_text_length:
                         stable_count += 1
-                        print(f"    Stable check {stable_count}/3 (length: {current_length})")
                         if stable_count >= 3:
-                            print(f"  ✓ Response confirmed stable!")
                             break
                     else:
-                        print(f"    Text still changing ({last_text_length} → {current_length})")
                         stable_count = 0
 
                     last_text_length = current_length
@@ -308,7 +289,6 @@ class VideoGenerationMacroBrowser:
                     time.sleep(3)
 
             # Final wait for DOM to settle
-            print(f"  Extracting response text...")
             time.sleep(3)
 
             # Use JavaScript to extract response - MUCH more reliable!
@@ -317,7 +297,6 @@ class VideoGenerationMacroBrowser:
 
             for extract_attempt in range(extraction_attempts):
                 if extract_attempt > 0:
-                    print(f"  Retry extraction attempt {extract_attempt + 1}/{extraction_attempts}...")
                     time.sleep(3)
 
                 # JavaScript approach - scan the DOM and extract last message
@@ -368,31 +347,16 @@ class VideoGenerationMacroBrowser:
                     result_json = self.driver.execute_script(js_extract_script)
                     result = json.loads(result_json)
 
-                    print(f"  [DEBUG] JavaScript extraction: found {result.get('count', 0)} messages")
-
                     if result.get('success') and result.get('text'):
                         response_text = result['text'].strip()
-                        method = result.get('method', 'unknown')
-                        print(f"  [DEBUG] Extracted via JS (selector: {method})")
-
-                        # Show FIRST and LAST parts for verification
-                        if len(response_text) > 300:
-                            first_part = response_text[:150]
-                            last_part = response_text[-150:]
-                            print(f"  [DEBUG] Response START: {first_part}...")
-                            print(f"  [DEBUG] Response END: ...{last_part}")
-                        else:
-                            print(f"  [DEBUG] Response preview: {response_text[:150]}...")
                         break
 
-                except Exception as e:
-                    print(f"  [DEBUG] JS extraction error: {e}")
+                except:
+                    pass
 
                 # Fallback: Try direct Selenium element finding
                 if not response_text:
-                    print(f"  [DEBUG] Trying Selenium fallback...")
                     all_divs = self.driver.find_elements(By.TAG_NAME, "div")
-                    print(f"  [DEBUG] Found {len(all_divs)} total divs on page")
 
                     for div in reversed(all_divs):
                         try:
@@ -401,7 +365,6 @@ class VideoGenerationMacroBrowser:
                                 # Don't include if it contains the prompt
                                 if prompt[:30] not in text:
                                     response_text = text
-                                    print(f"  [DEBUG] Selenium fallback found text: {response_text[:100]}...")
                                     break
                         except:
                             continue
@@ -410,7 +373,7 @@ class VideoGenerationMacroBrowser:
                     break  # Got a response, stop retrying
 
             if response_text:
-                print(f"  ✓ Response captured ({len(response_text)} characters)")
+                print(f"  Response captured ({len(response_text)} chars)\n")
                 return response_text
             else:
                 print("\n" + "="*60)
@@ -545,12 +508,10 @@ class VideoGenerationMacroBrowser:
             if extract_all:
                 # For scripts: return ALL candidate lines joined together
                 result = '\n\n'.join(candidates)
-                print(f"  [DEBUG] Extracted ALL {len(candidates)} content lines (script mode)")
                 return result
             else:
                 # For titles/descriptions: return only the LAST line
                 result = candidates[-1].strip('"\'')
-                print(f"  [DEBUG] Extracted LAST line from {len(candidates)} candidate lines")
                 return result
 
         # Fallback: Look for content after common intro phrases
@@ -563,16 +524,14 @@ class VideoGenerationMacroBrowser:
                     # Get first line of that
                     first_line = content.split('\n')[0].strip().strip('"\'')
                     if first_line:
-                        print(f"  [DEBUG] Extracted after intro phrase '{intro}'")
                         return first_line
 
         # Last resort: Return the whole response cleaned up
-        print(f"  [DEBUG] Using full response as fallback")
         return response.strip().strip('"\'')
 
     def generate_title_browser(self) -> str:
         """Generate video title using Claude.ai Project with approval loop"""
-        print("\n=== STEP 1: Generating Video Title (English) ===")
+        print("\n=== STEP 1: Generating Video Title ===")
 
         while True:
             prompt = """Generate a YouTube video title in English.
@@ -591,28 +550,23 @@ JUST OUTPUT THE TITLE. No explanations."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
 
-            print(f"  [DEBUG] Raw response received ({len(response)} chars)")
-            print(f"  [DEBUG] First 300 chars: '{response[:300]}...'")
-            print(f"  [DEBUG] Last 300 chars: '...{response[-300:]}'")
-
             # Parse the response to extract JUST the title (not Claude's thinking/searching)
             title = self.extract_generated_content(response)
 
-            print(f"\n📋 Generated Title:\n{title}\n")
-            print(f"  [DEBUG] Final title after processing: '{title}'")
+            print(f"\nGenerated Title:\n{title}\n")
 
             # Get user approval
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
 
             if choice == 'a':
-                print(f"✓ Title approved: {title}")
+                print(f"\nTitle approved\n")
                 return title
             elif choice == 'd':
-                print("\n🔄 Regenerating title...")
+                print("\nRegenerating...")
                 continue
             elif choice == 'm':
                 modification = input("\nWhat would you like to change? ")
-                print(f"\n✏️ Modifying title...")
+                print("\nModifying...")
 
                 modify_prompt = f"""Current title: "{title}"
 
@@ -622,14 +576,14 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 title = self.extract_generated_content(response)
-                print(f"\n📋 Modified Title:\n{title}\n")
+                print(f"\nModified Title:\n{title}\n")
 
                 # Ask for approval again
                 if input("Approve this version? [y/n]: ").lower() == 'y':
-                    print(f"✓ Title approved: {title}")
+                    print("\nTitle approved\n")
                     return title
                 else:
-                    print("\n🔄 Starting over...")
+                    print("\nStarting over...")
                     continue
             else:
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
@@ -637,9 +591,7 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
 
     def generate_description_browser(self, title: str) -> str:
         """Generate video description using Claude.ai Project with approval loop"""
-        print("\n=== STEP 2: Generating Video Description (English) ===")
-        print(f"  [DEBUG] Title parameter received: '{title}'")
-        print(f"  [DEBUG] Title length: {len(title)} characters")
+        print("\n=== STEP 2: Generating Video Description ===")
 
         while True:
             prompt = f"""Generate a DETAILED, COMPREHENSIVE video description for this title: "{title}"
@@ -667,15 +619,15 @@ JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
             response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
             description = self.extract_generated_content(response)
 
-            print(f"\n📋 Generated Description:\n{description}\n")
+            print(f"\nGenerated Description:\n{description}\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
 
             if choice == 'a':
-                print(f"✓ Description approved")
+                print("\nDescription approved\n")
                 return description
             elif choice == 'd':
-                print("\n🔄 Regenerating description...")
+                print("\nRegenerating...")
                 continue
             elif choice == 'm':
                 modification = input("\nWhat would you like to change? ")
@@ -687,13 +639,13 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 description = self.extract_generated_content(response)
-                print(f"\n📋 Modified Description:\n{description}\n")
+                print(f"\nModified Description:\n{description}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
-                    print(f"✓ Description approved")
+                    print("\nDescription approved\n")
                     return description
                 else:
-                    print("\n🔄 Starting over...")
+                    print("\nStarting over...")
                     continue
             else:
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
@@ -701,7 +653,7 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
     def generate_premise_browser(self, title: str) -> str:
         """Generate video premise using Claude.ai Project with approval loop"""
-        print("\n=== STEP 3: Generating Video Premise (English) ===")
+        print("\n=== STEP 3: Generating Video Premise ===")
 
         while True:
             prompt = f"""Generate a video premise based on this title: "{title}"
@@ -716,15 +668,15 @@ JUST OUTPUT THE PREMISE."""
             response = self.send_prompt_and_wait(prompt, wait_time=60)
             premise = self.extract_generated_content(response)
 
-            print(f"\n📋 Generated Premise:\n{premise}\n")
+            print(f"\nGenerated Premise:\n{premise}\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
 
             if choice == 'a':
-                print(f"✓ Premise approved")
+                print("\nPremise approved\n")
                 return premise
             elif choice == 'd':
-                print("\n🔄 Regenerating premise...")
+                print("\nRegenerating...")
                 continue
             elif choice == 'm':
                 modification = input("\nWhat would you like to change? ")
@@ -736,13 +688,13 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
                 premise = self.extract_generated_content(response)
-                print(f"\n📋 Modified Premise:\n{premise}\n")
+                print(f"\nModified Premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
-                    print(f"✓ Premise approved")
+                    print("\nPremise approved\n")
                     return premise
                 else:
-                    print("\n🔄 Starting over...")
+                    print("\nStarting over...")
                     continue
             else:
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
@@ -750,6 +702,7 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
 
     def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
         """Generate one segment of the script using Claude.ai Project"""
+        print(f"  Generating segment {segment_num}/{total_segments}...")
 
         prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
 
@@ -780,7 +733,6 @@ CRITICAL - KOREAN CONTEXT ONLY:
 
 JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
-        print(f"  Generating segment {segment_num}/{total_segments}...")
         # EXTRA LONG waits for script segments (they're 1625+ words)
         response = self.send_prompt_and_wait(
             prompt,
@@ -791,7 +743,7 @@ JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segmen
         segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
 
         word_count = len(segment_text.split())
-        print(f"  ✓ Segment {segment_num} generated ({len(segment_text)} characters, ~{word_count} words)")
+        print(f"  Segment {segment_num} complete (~{word_count} words)\n")
         return segment_text
 
     def _get_segment_focus(self, segment_num: int, total_segments: int) -> str:
@@ -805,34 +757,29 @@ JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segmen
 
     def generate_full_script_browser(self, title: str, premise: str) -> str:
         """Generate full script using Claude.ai Project in segments"""
-        print("\n=== STEP 4: Generating Full Video Script (English) ===")
-        print("Target: 6000-7000 words")
+        print("\n=== STEP 4: Generating Full Video Script ===")
+        print("Target: 6000-7000 words\n")
 
         num_segments = 4
         segments = []
 
         for i in range(1, num_segments + 1):
-            print(f"\nGenerating segment {i}/{num_segments}...")
             segment = self.generate_script_segment_browser(title, premise, i, num_segments)
             segments.append(segment)
 
-            word_count = len(segment.split())
-            print(f"Segment {i} word count: {word_count}")
-
             # Wait between segments to avoid rate limits
             if i < num_segments:
-                print("⏱ Waiting 10 seconds before next segment...")
                 time.sleep(10)
 
         # Combine segments
         full_script = "\n\n".join(segments)
         total_words = len(full_script.split())
 
-        print(f"\nInitial total word count: {total_words}")
+        print(f"Total word count: {total_words}")
 
         # Adjust if needed
         if total_words < 6000:
-            print(f"\nWord count ({total_words}) is below target. Generating additional content...")
+            print(f"Below target - generating additional content...")
             additional_prompt = f"""The current script is {total_words} words. We need to reach 6000-7000 words.
 
 Add more detailed content to this script:
@@ -854,32 +801,45 @@ Generate the ADDITIONAL content only:"""
             print(f"Updated word count: {total_words}")
 
         if total_words > 7000:
-            print(f"\nWord count ({total_words}) exceeds target. Trimming to ~7000 words...")
+            print(f"Trimming to ~7000 words...")
             words = full_script.split()
-            full_script = " ".join(words[:7000])
-            total_words = 7000
+            trimmed_text = " ".join(words[:7000])
 
-        print(f"\n✓ Final English script word count: {total_words} words")
+            # Find the last complete sentence (ending with . ! or ?)
+            last_period = max(
+                trimmed_text.rfind('.'),
+                trimmed_text.rfind('!'),
+                trimmed_text.rfind('?')
+            )
+
+            if last_period > 0:
+                # Keep text up to and including the sentence-ending punctuation
+                full_script = trimmed_text[:last_period + 1]
+                total_words = len(full_script.split())
+            else:
+                # Fallback: just use 7000 words if no sentence ending found
+                full_script = trimmed_text
+                total_words = 7000
+
+        print(f"\nFinal script: {total_words} words")
 
         # Show preview and get approval
         while True:
-            print("\n" + "="*60)
-            print("SCRIPT PREVIEW (first 500 characters):")
-            print(full_script[:500] + "...")
-            print("="*60)
+            print("\nScript Preview (first 500 characters):")
+            print(full_script[:500] + "...\n")
 
-            choice = input("\nOptions: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
+            choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
 
             if choice == 'a':
-                print(f"✓ Script approved")
+                print("\nScript approved\n")
                 return full_script
             elif choice == 'd':
-                print("\n🔄 Regenerating entire script from scratch...")
+                print("\nRegenerating entire script...")
                 # Recursive call to regenerate
                 return self.generate_full_script_browser(title, premise)
             elif choice == 'm':
                 modification = input("\nWhat would you like to change in the script? ")
-                print(f"\n✏️ Modifying script...")
+                print("\nModifying script...")
 
                 modify_prompt = f"""Current script ({total_words} words):
 
@@ -895,17 +855,15 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 full_script = response.strip()
                 total_words = len(full_script.split())
 
-                print(f"\n✓ Modified script word count: {total_words} words")
-                print("\n" + "="*60)
-                print("MODIFIED SCRIPT PREVIEW:")
-                print(full_script[:500] + "...")
-                print("="*60)
+                print(f"\nModified script: {total_words} words")
+                print("\nModified Script Preview:")
+                print(full_script[:500] + "...\n")
 
-                if input("\nApprove this version? [y/n]: ").lower() == 'y':
-                    print(f"✓ Script approved")
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print("\nScript approved\n")
                     return full_script
                 else:
-                    print("\n🔄 Continuing with modifications...")
+                    print("\nContinuing with modifications...")
                     continue
             else:
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
@@ -913,7 +871,7 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
         """Translate text to Korean using Claude.ai Project"""
-        print(f"\nTranslating {content_type} to Korean...")
+        print(f"Translating {content_type} to Korean...")
 
         prompt = f"""DO NOT explain. Translate NOW.
 
@@ -929,7 +887,6 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
         """Translate full script to Korean using uploaded file"""
         print("\n=== Translating Full Script to Korean ===")
-        print("Using uploaded script file for translation...")
 
         prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
 
@@ -943,7 +900,6 @@ IMPORTANT REQUIREMENTS:
 
 JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
-        print("Sending translation request to Claude...")
         response = self.send_prompt_and_wait(
             prompt,
             wait_time=300,  # 5 minutes for full script translation
@@ -952,15 +908,14 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
-
-        print(f"✓ Script translated to Korean ({len(korean_script)} characters)")
+        print(f"Script translated ({len(korean_script)} chars)\n")
 
         return korean_script
 
     def upload_file_to_project(self, file_path: str) -> bool:
         """Upload a file to the Claude.ai Project"""
         try:
-            print(f"\n📤 Uploading {Path(file_path).name} to Claude Project...")
+            print(f"\nUploading {Path(file_path).name}...")
 
             # Look for the file upload button/icon
             # Try multiple methods to find and click upload
@@ -977,11 +932,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
                 if elements:
                     upload_element = elements[0]
-                    print(f"  Found upload element with selector: {selector}")
                     break
 
             if not upload_element:
-                print("  ⚠ Could not find upload button, trying file input directly...")
                 # Try to find hidden file input and use JavaScript
                 file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                 if file_inputs:
@@ -998,7 +951,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 if upload_element.tag_name == 'input':
                     abs_path = str(Path(file_path).absolute())
                     upload_element.send_keys(abs_path)
-                    print(f"  ✓ File uploaded: {Path(file_path).name}")
+                    print(f"File uploaded\n")
                 else:
                     # If it's a button, click it first then find the file input
                     upload_element.click()
@@ -1007,19 +960,17 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                     if file_inputs:
                         abs_path = str(Path(file_path).absolute())
                         file_inputs[0].send_keys(abs_path)
-                        print(f"  ✓ File uploaded: {Path(file_path).name}")
+                        print(f"File uploaded\n")
 
                 # Wait for upload to complete
                 time.sleep(5)
                 return True
             else:
-                print("  ✗ Could not find upload mechanism")
+                print("Could not find upload mechanism")
                 return False
 
         except Exception as e:
-            print(f"  ✗ Error uploading file: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"Error uploading file: {e}")
             return False
 
     # === CHARACTER SELECTION ===
@@ -1039,8 +990,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             print(f"Error: No character folders found in {characters_base}")
             sys.exit(1)
 
-        print("\n" + "="*60)
-        print("=== CHARACTER SELECTION ===")
+        print("\n" + "="*50)
+        print("CHARACTER SELECTION")
         print(f"\nFound {len(character_folders)} character(s):\n")
 
         for i, folder in enumerate(character_folders, 1):
@@ -1053,8 +1004,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                          list(folder.glob("*.png")) + list(folder.glob("*.webp"))
             num_images = len(image_files)
 
-            print(f"  {i}. {folder.name}")
-            print(f"     Video: {has_video} | Images: {num_images}")
+            print(f"{i}. {folder.name} - Video: {has_video} | Images: {num_images}")
 
         # Get selection
         while True:
@@ -1083,17 +1033,12 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             try:
                 with open(character_name_file, 'r', encoding='utf-8') as f:
                     character_name = f.read().strip()
-                print(f"\n✓ Selected: {selected_folder.name}")
-                print(f"✓ Character name: {character_name}")
-                print(f"✓ Using video: {video_file.name}")
-            except Exception as e:
-                print(f"Warning: Could not read character_name.txt: {e}")
-                print(f"\n✓ Selected: {selected_folder.name}")
-                print(f"✓ Using video: {video_file.name}")
+                print(f"\nSelected: {selected_folder.name}")
+                print(f"Character: {character_name}")
+            except:
+                print(f"\nSelected: {selected_folder.name}")
         else:
-            print(f"\n✓ Selected: {selected_folder.name}")
-            print(f"✓ Using video: {video_file.name}")
-            print(f"  (No character_name.txt found - add one to display character name)")
+            print(f"\nSelected: {selected_folder.name}")
 
         return str(selected_folder), str(video_file), character_name
 
@@ -1114,11 +1059,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         num_to_select = min(num_images, len(image_files))
         selected = random.sample(image_files, num_to_select)
 
-        print(f"\n✓ Found {len(image_files)} image(s) in character folder")
-        print(f"✓ Randomly selected {num_to_select} images from {len(image_files)} available\n")
-
-        for img in selected:
-            print(f"  - {img.name}")
+        print(f"\nSelected {num_to_select} images from {len(image_files)} available")
 
         return [str(img) for img in selected]
 
@@ -1135,10 +1076,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
         voice_id = self.config.get("genaipro_voice_id", "226893671006272")
 
-        print(f"\nGenerating voiceover with GenAIPro Max API...")
-        print(f"Voice ID: {voice_id}")
-        print(f"Script length: {len(korean_script)} characters")
-        print(f"\nThis may take a few minutes depending on script length...")
+        print(f"\nGenerating voiceover ({len(korean_script)} chars)...")
+        print("This may take a few minutes...")
 
         # Create TTS task
         url = "https://genaipro.vn/api/v1/max/tasks"
@@ -1159,15 +1098,13 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         }
 
         try:
-            print("Creating TTS task...")
             response = requests.post(url, headers=headers, json=payload)
             response.raise_for_status()
 
             task_data = response.json()
             task_id = task_data.get("id")
 
-            print(f"✓ Task created: {task_id}")
-            print("Waiting for voiceover generation...")
+            print(f"Task created: {task_id}")
 
             # Poll for completion
             task_url = f"https://genaipro.vn/api/v1/max/tasks/{task_id}"
@@ -1185,21 +1122,21 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 status = task_info.get("status")
                 progress = task_info.get("process_percentage", 0)
 
-                print(f"Progress: {progress}% - Status: {status}")
+                if progress % 20 == 0 or status == "completed":  # Only show every 20%
+                    print(f"Progress: {progress}%")
 
                 if status == "completed":
                     result_url = task_info.get("result")
 
                     if not result_url:
-                        print("✗ No result URL in response")
+                        print("Error: No result URL")
                         return None
 
                     # Fix relative URL if needed
                     if not result_url.startswith('http'):
                         result_url = f"https://genaipro.vn{result_url}"
 
-                    print(f"\n✓ Voiceover generated! Downloading...")
-                    print(f"  URL: {result_url}")
+                    print("Downloading...")
 
                     # Download
                     audio_response = requests.get(result_url)
@@ -1209,27 +1146,25 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                         f.write(audio_response.content)
 
                     file_size = Path(output_path).stat().st_size / (1024 * 1024)
-                    print(f"✓ Voiceover downloaded successfully!")
-                    print(f"  File: {output_path}")
-                    print(f"  Size: {file_size:.2f} MB")
+                    print(f"Voiceover complete ({file_size:.2f} MB)\n")
 
                     return output_path
 
                 elif status == "failed":
                     error = task_info.get("error", "Unknown error")
-                    print(f"✗ Task failed: {error}")
+                    print(f"Task failed: {error}")
                     return None
 
-            print("✗ Task timed out after 15 minutes")
+            print("Task timed out after 15 minutes")
             return None
 
         except Exception as e:
-            print(f"✗ Error generating voiceover: {e}")
+            print(f"Error generating voiceover: {e}")
             return None
 
     def generate_subtitles(self, korean_script: str, output_path: str, duration: float = 300.0) -> str:
         """Generate SRT subtitle file from Korean script"""
-        print("\n=== Generating Subtitles (SRT format) ===")
+        print("\n=== Generating Subtitles ===")
 
         # Split script into sentences
         sentences = korean_script.replace('\n\n', '. ').replace('\n', ' ').split('. ')
@@ -1256,9 +1191,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(srt_content))
 
-        print(f"✓ Subtitles saved to: {output_path}")
-        print(f"Total subtitle entries: {len(sentences)}")
-        print(f"Estimated duration: {duration:.1f} seconds")
+        print(f"Subtitles created ({len(sentences)} entries, {duration:.1f}s)\n")
 
         return output_path
 
@@ -1288,19 +1221,12 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
     def edit_video_ffmpeg(self, voiceover_path: str, image_paths: List[str], subtitle_path: str, output_path: str) -> Optional[str]:
         """Edit video using FFmpeg - 90s looped video + images for remainder"""
-        print("\n=== STEP 8: Editing Video with FFmpeg ===")
+        print("\n=== STEP 8: Editing Video ===")
 
         # Get voiceover duration
         voiceover_duration = self.get_audio_duration(voiceover_path)
-        print(f"✓ Voiceover duration: {voiceover_duration:.2f} seconds")
-
-        video_path = self.selected_character_video
-        print(f"✓ Input video: {Path(video_path).name}")
-        print(f"✓ Images to overlay: {len(image_paths)}")
-        print(f"✓ Subtitles: {Path(subtitle_path).name}")
-        print(f"✓ Output: {Path(output_path).name}")
-
-        print(f"\n🎬 Building video with FFmpeg...")
+        print(f"Duration: {voiceover_duration:.2f}s")
+        print(f"Images: {len(image_paths)}\n")
 
         working_dir = Path(output_path).parent
         temp_looped = working_dir / "temp_looped.mp4"
@@ -1310,7 +1236,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
         try:
             # Step 1: Create 90-second looped video
-            print("  [1/6] Creating 90-second looped video...")
+            print("[1/6] Looping video to 90s...")
             loop_cmd = [
                 'ffmpeg', '-y',
                 '-stream_loop', '-1',  # Loop indefinitely
@@ -1321,18 +1247,15 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 str(temp_looped)
             ]
             subprocess.run(loop_cmd, capture_output=True, check=True)
-            print("    ✓ 90-second video created")
 
             # Step 2: Create video segments from images
-            print(f"  [2/6] Creating video segments from {len(image_paths)} images...")
+            print(f"[2/6] Creating image segments...")
 
             remaining_duration = voiceover_duration - 90
             if remaining_duration <= 0:
-                print("    ⚠ Voiceover is 90 seconds or less, skipping images")
                 image_segments = []
             else:
                 duration_per_image = remaining_duration / len(image_paths)
-                print(f"    Each image will display for {duration_per_image:.1f} seconds")
 
                 image_segments = []
                 for i, img_path in enumerate(image_paths, 1):
@@ -1352,10 +1275,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                     subprocess.run(img_cmd, capture_output=True, check=True)
                     image_segments.append(temp_img_video)
 
-                print(f"    ✓ {len(image_segments)} image segments created")
-
             # Step 3: Concatenate all segments
-            print("  [3/6] Concatenating video segments...")
+            print("[3/6] Concatenating segments...")
 
             # Create concat list
             with open(temp_concat_list, 'w', encoding='utf-8') as f:
@@ -1372,14 +1293,15 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 str(temp_concatenated)
             ]
             subprocess.run(concat_cmd, capture_output=True, check=True)
-            print("    ✓ Segments concatenated")
 
             # Step 4: Add subtitles
-            print("  [4/6] Burning in subtitles...")
+            print("[4/6] Burning subtitles...")
 
-            # Windows path fix for subtitles
+            # Windows path fix for subtitles - properly escape for FFmpeg filter syntax
             subtitle_path_fixed = str(Path(subtitle_path).absolute()).replace('\\', '/')
             subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\\\:')
+            # Escape spaces for FFmpeg filter syntax on Windows
+            subtitle_path_fixed = subtitle_path_fixed.replace(' ', '\\\\ ')
 
             subtitle_cmd = [
                 'ffmpeg', '-y',
@@ -1390,10 +1312,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 str(temp_with_subs)
             ]
             subprocess.run(subtitle_cmd, capture_output=True, check=True)
-            print("    ✓ Subtitles burned in")
 
             # Step 5: Add voiceover
-            print("  [5/6] Adding voiceover and exporting final video...")
+            print("[5/6] Adding voiceover...")
 
             final_cmd = [
                 'ffmpeg', '-y',
@@ -1407,23 +1328,19 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 str(output_path)
             ]
             subprocess.run(final_cmd, capture_output=True, check=True)
-            print("    ✓ Final video exported")
 
             # Step 6: Cleanup
-            print("  [6/6] Cleaning up temporary files...")
+            print("[6/6] Cleaning up...")
             temp_looped.unlink(missing_ok=True)
             temp_concat_list.unlink(missing_ok=True)
             temp_concatenated.unlink(missing_ok=True)
             temp_with_subs.unlink(missing_ok=True)
             for seg in image_segments:
                 seg.unlink(missing_ok=True)
-            print("    ✓ Cleanup complete")
 
             # Show result
             file_size = Path(output_path).stat().st_size / (1024 * 1024)
-            print(f"\n✅ Video editing complete: {output_path}")
-            print(f"   Duration: {voiceover_duration:.2f} seconds")
-            print(f"   Size: {file_size:.2f} MB")
+            print(f"\nVideo complete ({voiceover_duration:.2f}s, {file_size:.2f} MB)\n")
 
             return output_path
 
@@ -1438,7 +1355,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
     def play_video(self, video_path: str):
         """Automatically open the video in default player"""
-        print(f"\n🎬 Opening video automatically...")
+        print(f"\nOpening video...")
         try:
             if sys.platform == 'win32':
                 os.startfile(video_path)
@@ -1446,9 +1363,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 subprocess.run(['open', video_path])
             else:  # Linux
                 subprocess.run(['xdg-open', video_path])
-            print("✓ Video opened in default player")
         except Exception as e:
-            print(f"⚠ Could not auto-open video: {e}")
+            print(f"Could not auto-open: {e}")
             print(f"Please open manually: {video_path}")
 
     def sanitize_filename(self, filename: str) -> str:
@@ -1478,9 +1394,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
     def run(self):
         """Main execution flow - browser automation for content, API for media"""
         try:
-            print("\n" + "="*60)
-            print("AI VIDEO GENERATION MACRO - BROWSER VERSION")
-            print("="*60)
+            print("\n" + "="*50)
+            print("AI VIDEO GENERATION MACRO")
+            print("="*50)
 
             # === CHARACTER SELECTION ===
             self.selected_character_folder, self.selected_character_video, self.character_name = self.select_character()
@@ -1490,17 +1406,14 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             self.navigate_to_project()
 
             # === PHASE 1: GENERATE ENGLISH CONTENT (Browser) ===
-            print("\n" + "="*60)
-            print("📝 PHASE 1: GENERATE ALL ENGLISH CONTENT (Browser)")
-            print("="*60)
+            print("="*50)
+            print("PHASE 1: GENERATE ENGLISH CONTENT")
+            print("="*50)
 
             english_title = self.generate_title_browser()
-            print(f"\n  [DEBUG MAIN] Returned title: '{english_title}'")
-            print(f"  [DEBUG MAIN] Title type: {type(english_title)}, length: {len(english_title)}")
             time.sleep(5)
 
             english_description = self.generate_description_browser(english_title)
-            print(f"\n  [DEBUG MAIN] Returned description: '{english_description[:100]}...'")
             time.sleep(5)
 
             english_premise = self.generate_premise_browser(english_title)
@@ -1513,8 +1426,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             self.working_dir = self.base_output_dir / folder_name
             self.working_dir.mkdir(exist_ok=True)
 
-            print(f"\n✓ Created output folder: {self.working_dir}")
-            print("   All files for this video will be saved here.")
+            print(f"\nOutput folder: {self.working_dir}")
 
             # Save English content
             script_path = self.working_dir / "video_script_english.txt"
@@ -1523,33 +1435,29 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 f.write(f"Description: {english_description}\n\n")
                 f.write(f"Premise: {english_premise}\n\n")
                 f.write(f"Script:\n{english_script}")
-            print(f"✓ English script saved to: {script_path}")
+            print(f"English script saved\n")
 
             # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
-            print("\n" + "="*60)
-            print("📤 UPLOADING SCRIPT TO CLAUDE PROJECT")
-            print("="*60)
+            print("="*50)
+            print("UPLOADING SCRIPT")
+            print("="*50)
 
             upload_success = self.upload_file_to_project(str(script_path))
             if upload_success:
-                print("✓ Script uploaded successfully - ready for translation")
                 time.sleep(3)  # Wait for upload to fully process
             else:
-                print("⚠ Upload failed - will attempt translation without file reference")
+                print("Upload failed")
 
             # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
-            print("\n" + "="*60)
-            print("🌐 PHASE 2: TRANSLATE ALL CONTENT TO KOREAN (Browser)")
-            print("="*60)
+            print("="*50)
+            print("PHASE 2: TRANSLATE TO KOREAN")
+            print("="*50 + "\n")
 
             korean_title = self.translate_to_korean_browser(english_title, "title")
             time.sleep(5)
 
             korean_description = self.translate_to_korean_browser(english_description, "description")
             time.sleep(5)
-
-            # NOTE: Premise is NOT translated - kept in English for internal use
-            print("ℹ️  Premise is kept in English (not translated)")
 
             # Translate full script using uploaded file (not chunks)
             korean_script = self.translate_script_to_korean_browser(str(script_path))
@@ -1558,13 +1466,11 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             korean_title_path = self.working_dir / "video_title_korean.txt"
             with open(korean_title_path, 'w', encoding='utf-8') as f:
                 f.write(korean_title)
-            print(f"✓ Korean title saved to: {korean_title_path}")
 
             # Save Korean description as separate file
             korean_description_path = self.working_dir / "video_description_korean.txt"
             with open(korean_description_path, 'w', encoding='utf-8') as f:
                 f.write(korean_description)
-            print(f"✓ Korean description saved to: {korean_description_path}")
 
             # Save Korean content (title, description, and script combined)
             korean_script_path = self.working_dir / "video_script_korean.txt"
@@ -1572,24 +1478,24 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 f.write(f"Title: {korean_title}\n\n")
                 f.write(f"Description: {korean_description}\n\n")
                 f.write(f"Script:\n{korean_script}")
-            print(f"✓ Korean script (combined) saved to: {korean_script_path}")
+            print(f"Korean files saved\n")
 
             # === CLOSE BROWSER ===
-            print("\n🌐 Closing browser...")
+            print("Closing browser...")
             self.driver.quit()
-            print("✓ Browser closed")
+            print("Browser closed\n")
 
             # === PHASE 3: GENERATE MEDIA (API + FFmpeg) ===
-            print("\n" + "="*60)
-            print("🎬 PHASE 3: GENERATE MEDIA ASSETS (API + FFmpeg)")
-            print("="*60)
+            print("="*50)
+            print("PHASE 3: GENERATE MEDIA")
+            print("="*50)
 
             # Generate voiceover
             voiceover_path = self.working_dir / "voiceover.mp3"
             voiceover_result = self.generate_voiceover_genaipro(korean_script, str(voiceover_path))
 
             if not voiceover_result:
-                print("✗ Voiceover generation failed. Exiting.")
+                print("Voiceover generation failed. Exiting.")
                 return
 
             # Get voiceover duration for subtitles
@@ -1600,7 +1506,6 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             self.generate_subtitles(korean_script, str(subtitle_path), duration)
 
             # Load images
-            print("\n=== STEP 6: Loading Images from Character Folder ===")
             num_images = self.config.get("num_images", 4)
             image_paths = self.get_character_images(num_images)
 
@@ -1614,17 +1519,16 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             )
 
             if not video_result:
-                print("✗ Video editing failed. Exiting.")
+                print("Video editing failed. Exiting.")
                 return
 
             # === COMPLETION ===
-            print("\n" + "="*60)
-            print("✅ VIDEO GENERATION COMPLETE!")
-            print("="*60)
-            print(f"English Title: {english_title}")
+            print("="*50)
+            print("VIDEO GENERATION COMPLETE")
+            print("="*50)
+            print(f"\nEnglish Title: {english_title}")
             print(f"Korean Title: {korean_title}")
-            print(f"Video: {final_video_path}")
-            print(f"\nAll files are in: {self.working_dir}")
+            print(f"\nAll files: {self.working_dir}")
 
             # Auto-play video
             self.play_video(str(final_video_path))

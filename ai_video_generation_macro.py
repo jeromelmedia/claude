@@ -1112,8 +1112,10 @@ PREMISE: [Korean translation]"""
         temp_with_subs = self.working_dir / "temp_with_subs.mp4"
         print("  [4/6] Burning in subtitles...")
 
-        # Escape subtitle path for FFmpeg filter
-        subtitle_path_escaped = str(subtitle_path).replace('\\', '/').replace(':', '\\:')
+        # Escape subtitle path for FFmpeg filter - properly escape for Windows
+        subtitle_path_escaped = str(subtitle_path).replace('\\', '/').replace(':', '\\\\:')
+        # Escape spaces for FFmpeg filter syntax on Windows
+        subtitle_path_escaped = subtitle_path_escaped.replace(' ', '\\\\ ')
 
         subs_cmd = [
             'ffmpeg', '-y',
