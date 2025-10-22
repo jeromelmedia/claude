@@ -270,65 +270,92 @@ class VideoGenerationMacroBrowser:
             print(f"  Extracting response text...")
             time.sleep(3)
 
-            # Try multiple selectors to find Claude's response (with retries)
+            # Use JavaScript to extract response - MUCH more reliable!
             response_text = ""
-            extraction_attempts = 3
+            extraction_attempts = 5
 
             for extract_attempt in range(extraction_attempts):
                 if extract_attempt > 0:
                     print(f"  Retry extraction attempt {extract_attempt + 1}/{extraction_attempts}...")
-                    time.sleep(2)
+                    time.sleep(3)
 
-                # Try method 1: data-test-render-count
-                if not response_text:
-                    messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
-                    if messages:
-                        last_message = messages[-1]
-                        response_text = last_message.text.strip()
-                        if response_text:
-                            print(f"  [DEBUG] Captured response (method 1): {response_text[:100]}...")
+                # JavaScript approach - scan the DOM and extract last message
+                js_extract_script = """
+                // Find all potential message containers
+                var selectors = [
+                    'div[data-test-render-count]',
+                    'div[class*="Message"]',
+                    'div[class*="message"]',
+                    'div[role="article"]',
+                    'div[class*="assistant"]',
+                    'div[class*="response"]'
+                ];
 
-                # Try method 2: Find by class name (common pattern)
-                if not response_text:
-                    messages = self.driver.find_elements(By.CSS_SELECTOR, "div.font-claude-message")
-                    if messages:
-                        last_message = messages[-1]
-                        response_text = last_message.text.strip()
-                        if response_text:
-                            print(f"  [DEBUG] Captured response (method 2): {response_text[:100]}...")
+                var allMessages = [];
 
-                # Try method 3: Look for assistant message container
-                if not response_text:
-                    # Look for common assistant message patterns
-                    selectors_to_try = [
-                        "div[class*='assistant']",
-                        "div[class*='message']",
-                        "div[role='article']",
-                        "div[class*='response']"
-                    ]
-                    for selector in selectors_to_try:
-                        messages = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                        if messages:
-                            # Get last message that's not the prompt
-                            for msg in reversed(messages):
-                                text = msg.text.strip()
-                                if text and len(text) > 20 and prompt[:50] not in text:
-                                    response_text = text
-                                    print(f"  [DEBUG] Captured response (method 3, selector {selector}): {response_text[:100]}...")
-                                    break
-                        if response_text:
-                            break
+                for (var i = 0; i < selectors.length; i++) {
+                    var elements = document.querySelectorAll(selectors[i]);
+                    for (var j = 0; j < elements.length; j++) {
+                        var text = elements[j].innerText || elements[j].textContent;
+                        if (text && text.length > 20) {
+                            allMessages.push({
+                                text: text.trim(),
+                                length: text.length,
+                                selector: selectors[i],
+                                index: j
+                            });
+                        }
+                    }
+                }
 
-                # Try method 4: Find all divs with substantial text content
+                // Return the last non-empty message
+                if (allMessages.length > 0) {
+                    // Sort by appearance order and get last
+                    var lastMsg = allMessages[allMessages.length - 1];
+                    return JSON.stringify({
+                        success: true,
+                        text: lastMsg.text,
+                        method: lastMsg.selector,
+                        count: allMessages.length
+                    });
+                }
+
+                return JSON.stringify({success: false, text: '', count: 0});
+                """
+
+                try:
+                    result_json = self.driver.execute_script(js_extract_script)
+                    result = json.loads(result_json)
+
+                    print(f"  [DEBUG] JavaScript extraction: found {result.get('count', 0)} messages")
+
+                    if result.get('success') and result.get('text'):
+                        response_text = result['text'].strip()
+                        method = result.get('method', 'unknown')
+                        print(f"  [DEBUG] Extracted via JS (selector: {method})")
+                        print(f"  [DEBUG] Response preview: {response_text[:150]}...")
+                        break
+
+                except Exception as e:
+                    print(f"  [DEBUG] JS extraction error: {e}")
+
+                # Fallback: Try direct Selenium element finding
                 if not response_text:
+                    print(f"  [DEBUG] Trying Selenium fallback...")
                     all_divs = self.driver.find_elements(By.TAG_NAME, "div")
-                    for div in reversed(all_divs):  # Check from bottom up
-                        text = div.text.strip()
-                        # More robust check: not empty, substantial length, not the prompt
-                        if text and len(text) > 20 and prompt[:50] not in text and len(text) < 10000:
-                            response_text = text
-                            print(f"  [DEBUG] Captured response (method 4): {response_text[:100]}...")
-                            break
+                    print(f"  [DEBUG] Found {len(all_divs)} total divs on page")
+
+                    for div in reversed(all_divs):
+                        try:
+                            text = div.text.strip()
+                            if text and len(text) > 20 and len(text) < 5000:
+                                # Don't include if it contains the prompt
+                                if prompt[:30] not in text:
+                                    response_text = text
+                                    print(f"  [DEBUG] Selenium fallback found text: {response_text[:100]}...")
+                                    break
+                        except:
+                            continue
 
                 if response_text:
                     break  # Got a response, stop retrying
@@ -337,26 +364,74 @@ class VideoGenerationMacroBrowser:
                 print(f"  ✓ Response captured ({len(response_text)} characters)")
                 return response_text
             else:
-                print("  ✗ Could not extract response text from any method after all retries")
-                print("  ⚠ Saving screenshot for debugging...")
+                print("\n" + "="*60)
+                print("  ✗✗✗ EXTRACTION FAILED AFTER ALL RETRIES ✗✗✗")
+                print("="*60)
+
+                timestamp = int(time.time())
+
+                # Save screenshot
+                print("\n  📸 Saving screenshot for debugging...")
                 try:
-                    screenshot_path = f"debug_screenshot_{int(time.time())}.png"
+                    screenshot_path = f"debug_screenshot_{timestamp}.png"
                     self.driver.save_screenshot(screenshot_path)
-                    print(f"  Screenshot saved: {screenshot_path}")
-                except:
-                    pass
-                print("  ⚠ Trying to get page source for debugging...")
-                # Last resort - get full page text
+                    print(f"  ✓ Screenshot saved: {screenshot_path}")
+                except Exception as e:
+                    print(f"  ✗ Screenshot failed: {e}")
+
+                # Save page HTML
+                print("\n  📄 Saving page HTML for debugging...")
+                try:
+                    html_path = f"debug_page_{timestamp}.html"
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    print(f"  ✓ HTML saved: {html_path}")
+                except Exception as e:
+                    print(f"  ✗ HTML save failed: {e}")
+
+                # Get page text
+                print("\n  📝 Extracting visible page text...")
                 try:
                     body = self.driver.find_element(By.TAG_NAME, "body")
                     page_text = body.text
                     print(f"  [DEBUG] Full page text length: {len(page_text)}")
+
+                    # Save to file
+                    text_path = f"debug_text_{timestamp}.txt"
+                    with open(text_path, 'w', encoding='utf-8') as f:
+                        f.write(page_text)
+                    print(f"  ✓ Page text saved: {text_path}")
+
                     if len(page_text) > 500:
-                        print(f"  [DEBUG] Last 500 chars: ...{page_text[-500:]}")
+                        print(f"\n  Last 500 chars from page:\n  {page_text[-500:]}")
                     else:
-                        print(f"  [DEBUG] Full text: {page_text}")
+                        print(f"\n  Full page text:\n  {page_text}")
+
                 except Exception as e:
-                    print(f"  [DEBUG] Could not get page text: {e}")
+                    print(f"  ✗ Could not get page text: {e}")
+
+                # Try one more time with a super aggressive JavaScript scan
+                print("\n  🔍 Final attempt with aggressive JS scan...")
+                try:
+                    aggressive_js = """
+                    // Get ALL text from the page
+                    var allText = document.body.innerText || document.body.textContent;
+                    return allText;
+                    """
+                    all_text = self.driver.execute_script(aggressive_js)
+                    if all_text and len(all_text) > 50:
+                        print(f"  [DEBUG] Aggressive JS got {len(all_text)} chars")
+                        print(f"  [DEBUG] Text preview: {all_text[:300]}...")
+                        # Use this as last resort
+                        response_text = all_text.strip()
+                        print(f"  ⚠ Using full page text as fallback response")
+                        return response_text
+                except Exception as e:
+                    print(f"  ✗ Aggressive JS failed: {e}")
+
+                print("\n" + "="*60)
+                print("  Check the debug files above to see what's on the page!")
+                print("="*60 + "\n")
                 return ""
 
         except Exception as e:
