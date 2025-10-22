@@ -138,7 +138,8 @@ class VideoGenerationMacroBrowser:
             input()
 
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
-                             stabilization_wait: int = 20, max_stability_checks: int = 15) -> str:
+                             stabilization_wait: int = 20, max_stability_checks: int = 15,
+                             stability_threshold: int = 5, stability_check_interval: int = 5) -> str:
         """
         Send a prompt to Claude and wait for response
 
@@ -147,6 +148,8 @@ class VideoGenerationMacroBrowser:
             wait_time: Max time to wait for generation to complete
             stabilization_wait: Seconds to wait after Stop button disappears (default 20)
             max_stability_checks: Max number of stability checks (default 15)
+            stability_threshold: Number of consecutive stable checks required (default 5)
+            stability_check_interval: Seconds to wait between stability checks (default 5)
         """
         try:
             # Retry logic for DOM issues
@@ -302,8 +305,8 @@ class VideoGenerationMacroBrowser:
 
                     if current_message_length == last_message_length and current_message_length > 0:
                         stable_count += 1
-                        if stable_count >= 5:  # Increased from 3 to 5 for more confidence
-                            print(f"  Response stable ({current_message_length} chars)")
+                        if stable_count >= stability_threshold:
+                            print(f"  Response stable ({current_message_length} chars, {stable_count} checks)")
                             break
                     else:
                         if current_message_length > last_message_length:
@@ -311,7 +314,7 @@ class VideoGenerationMacroBrowser:
                         stable_count = 0
 
                     last_message_length = current_message_length
-                    time.sleep(5)  # Increased from 4 to 5 seconds between checks
+                    time.sleep(stability_check_interval)
                 except Exception as e:
                     print(f"  Stability check error: {e}")
                     time.sleep(5)
@@ -1054,9 +1057,11 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=600,  # 10 minutes for full script translation (increased from 8)
-            stabilization_wait=90,  # Much longer initial wait for large translation (increased from 60)
-            max_stability_checks=50  # More checks for translation to ensure complete (increased from 40)
+            wait_time=600,  # 10 minutes for full script translation
+            stabilization_wait=90,  # Much longer initial wait for large translation
+            max_stability_checks=60,  # More checks for translation to ensure complete
+            stability_threshold=12,  # Require 12 consecutive stable checks (not just 5)
+            stability_check_interval=10  # Wait 10 seconds between checks (not just 5)
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
