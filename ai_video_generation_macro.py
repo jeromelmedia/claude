@@ -258,7 +258,7 @@ class VideoGenerationMacro:
                     system=self.custom_instructions,
                     messages=[{
                         "role": "user",
-                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate. CRITICAL: You MUST keep the description under 5000 characters. Write a complete, compelling description that naturally fits within this limit without needing truncation."
+                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description for YouTube. \n\nIMPORTANT FORMATTING REQUIREMENTS:\n- Use proper paragraph breaks (line breaks) to separate different sections\n- Make it visually appealing and easy to read when copy-pasted into YouTube\n- Include line breaks between main points\n- Add proper spacing for readability\n\nThe description should be engaging and include a call-to-action if appropriate. CRITICAL: You MUST keep the description under 5000 characters. Write a complete, compelling description that naturally fits within this limit without needing truncation."
                     }]
                 )
                 break
@@ -280,6 +280,13 @@ class VideoGenerationMacro:
 
         print(f"\nGenerated English Description:\n{english_description}")
         print(f"✓ Auto-approved (running in full automation mode)")
+
+        # Save English description to file with proper formatting
+        description_path = self.working_dir / "video_description_english.txt"
+        with open(description_path, 'w', encoding='utf-8') as f:
+            # Write description with proper line breaks preserved
+            f.write(english_description)
+        print(f"✓ English description saved to: {description_path}")
 
         # Delay after heavy API call to avoid rate limiting
         # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
@@ -353,14 +360,20 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         prompt += f"\n\nWrite approximately {target_words_per_segment} words in your trained writing style."
 
-        # Add language requirements
+        # Add language and formatting requirements
         prompt += """\n
 CRITICAL LANGUAGE REQUIREMENTS:
 - Write ENTIRELY in ENGLISH language only
 - DO NOT include ANY Korean words, phrases, or greetings
 - DO NOT mix languages (no "여러분", "안녕하세요", etc.)
 - Use ONLY English vocabulary throughout
-- NO fabricated quotes or testimonials - describe patient stories without quotation marks"""
+- NO fabricated quotes or testimonials - describe patient stories without quotation marks
+
+FORMATTING REQUIREMENTS:
+- Use proper paragraph breaks (blank lines between paragraphs)
+- Format the script so it's easy to read when saved to a text file
+- Add line breaks between distinct sections or topics
+- DO NOT write everything as one continuous block of text"""
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -421,7 +434,13 @@ CRITICAL LANGUAGE REQUIREMENTS:
 Title: {english_title}
 Premise: {english_premise}
 
-Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target."""
+Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target.
+
+FORMATTING REQUIREMENTS:
+- Use proper paragraph breaks (blank lines between paragraphs)
+- Format the script so it's easy to read when saved to a text file
+- Add line breaks between distinct sections or topics
+- DO NOT write everything as one continuous block of text"""
 
             max_retries = 3
             for attempt in range(max_retries):
@@ -574,6 +593,13 @@ PREMISE: [Korean translation]"""
         print(f"✓ Korean title: {korean_title}")
         print(f"✓ Korean description: {korean_description[:100]}...")
         print(f"✓ Korean premise: {korean_premise[:100]}...")
+
+        # Save Korean description to file with proper formatting
+        korean_description_path = self.working_dir / "video_description_korean.txt"
+        with open(korean_description_path, 'w', encoding='utf-8') as f:
+            # Write description with proper line breaks preserved
+            f.write(korean_description)
+        print(f"✓ Korean description saved to: {korean_description_path}")
 
         time.sleep(2)  # Small delay
 
