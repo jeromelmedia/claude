@@ -268,15 +268,15 @@ class VideoGenerationMacroBrowser:
 
             # CRITICAL: Wait for response to fully stabilize
             # Claude may still be typing even after Stop button disappears
-            print(f"  ⏱️  Waiting for response to stabilize (15 seconds)...")
-            time.sleep(15)
+            print(f"  ⏱️  Waiting for response to stabilize (20 seconds)...")
+            time.sleep(20)  # Increased from 15 to 20 for longer content
 
             # Check if text is still changing (wait until stable)
             print(f"  🔍 Verifying response stability...")
             stable_count = 0
             last_text_length = 0
 
-            for stability_check in range(5):  # Check 5 times
+            for stability_check in range(15):  # Increased from 5 to 15 checks (up to 45 seconds)
                 try:
                     # Get current text length
                     current_js = "return document.body.innerText.length;"
@@ -293,9 +293,9 @@ class VideoGenerationMacroBrowser:
                         stable_count = 0
 
                     last_text_length = current_length
-                    time.sleep(2)
+                    time.sleep(3)  # Increased from 2 to 3 seconds between checks
                 except:
-                    time.sleep(2)
+                    time.sleep(3)
 
             # Final wait for DOM to settle
             print(f"  Extracting response text...")
@@ -608,7 +608,7 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
         print(f"  [DEBUG] Title length: {len(title)} characters")
 
         while True:
-            prompt = f"""Generate a video description for this title: "{title}"
+            prompt = f"""Generate a DETAILED, COMPREHENSIVE video description for this title: "{title}"
 
 Use the "korean video descriptions.txt" file in this project as reference for:
 - Description format and structure
@@ -616,11 +616,21 @@ Use the "korean video descriptions.txt" file in this project as reference for:
 - How to create curiosity
 - Call to action style
 
-Write 2-4 sentences in English following that style.
+REQUIREMENTS:
+- Write a LONG, DETAILED description (aim for 500-1000+ words)
+- Maximum 5000 characters
+- Include multiple paragraphs
+- Explain what viewers will learn
+- Build curiosity and urgency
+- Include specific benefits and takeaways
+- Use emotional hooks
+- End with strong call to action
 
-JUST OUTPUT THE DESCRIPTION."""
+Write in English following that style.
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
+
+            response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
             description = self.extract_generated_content(response)
 
             print(f"\n📋 Generated Description:\n{description}\n")
@@ -725,10 +735,14 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 - Use "you" language and conversational style
 - Scientific explanations in simple terms
 
-JUST WRITE THE SCRIPT SEGMENT IN ENGLISH."""
+JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
-        response = self.send_prompt_and_wait(prompt, wait_time=120)
-        return response.strip()
+        print(f"  Generating segment {segment_num}/{total_segments}...")
+        response = self.send_prompt_and_wait(prompt, wait_time=180)  # 3 minutes for long segments
+        segment_text = self.extract_generated_content(response)
+
+        print(f"  ✓ Segment {segment_num} generated ({len(segment_text)} characters)")
+        return segment_text
 
     def _get_segment_focus(self, segment_num: int, total_segments: int) -> str:
         """Get focus instructions for each segment"""
