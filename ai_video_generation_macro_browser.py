@@ -1039,9 +1039,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=360,  # 6 minutes for full script translation
-            stabilization_wait=45,  # Extra long wait for large translation
-            max_stability_checks=35  # More checks for translation to ensure complete
+            wait_time=480,  # 8 minutes for full script translation (up from 6)
+            stabilization_wait=60,  # Much longer initial wait for large translation (up from 45)
+            max_stability_checks=40  # More checks for translation to ensure complete (up from 35)
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
@@ -1377,7 +1377,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             loop_cmd = [
                 'ffmpeg', '-y',
                 '-stream_loop', '-1',  # Loop indefinitely
-                '-i', video_path,
+                '-i', self.selected_character_video,
                 '-t', '90',  # 90 seconds
                 '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                 '-an',  # No audio
@@ -1517,8 +1517,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         # Remove leading/trailing dots and spaces
         filename = filename.strip('. ')
 
-        # Truncate to reasonable length
-        max_length = 100
+        # Truncate to reasonable length (reduced from 100 to 60 to accommodate long base paths)
+        max_length = 60
         if len(filename) > max_length:
             filename = filename[:max_length].strip()
 
