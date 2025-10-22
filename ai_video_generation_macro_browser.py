@@ -311,14 +311,14 @@ class VideoGenerationMacroBrowser:
                         stable_count = 0
 
                     last_message_length = current_message_length
-                    time.sleep(4)  # Increased from 3 to 4 seconds between checks
+                    time.sleep(5)  # Increased from 4 to 5 seconds between checks
                 except Exception as e:
                     print(f"  Stability check error: {e}")
-                    time.sleep(4)
+                    time.sleep(5)
 
             # Final wait for DOM to settle and any final rendering
             print("  Final stabilization...")
-            time.sleep(5)  # Increased from 3 to 5 seconds
+            time.sleep(8)  # Increased from 5 to 8 seconds for extra safety
 
             # Use JavaScript to extract response - MUCH more reliable!
             response_text = ""
@@ -840,9 +840,9 @@ JUST WRITE THE SCRIPT SEGMENT IN PURE ENGLISH. NO explanations, NO "here's the s
         # EXTRA LONG waits for script segments (they're 1625+ words)
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=240,  # 4 minutes max wait
-            stabilization_wait=30,  # 30 seconds initial stabilization (up from 20)
-            max_stability_checks=20  # 20 checks = up to 60 more seconds (up from 15)
+            wait_time=300,  # 5 minutes max wait (up from 4)
+            stabilization_wait=45,  # 45 seconds initial stabilization (up from 30)
+            max_stability_checks=30  # 30 checks = up to 150 more seconds (up from 20)
         )
         segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
 
