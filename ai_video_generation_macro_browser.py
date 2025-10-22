@@ -976,6 +976,60 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
                 continue
 
+    def translate_file_to_korean_browser(self, file_path: str, content_type: str = "text") -> str:
+        """Upload a file to Claude Project and translate its contents to Korean"""
+        file_name = Path(file_path).name
+        print(f"\n=== Translating {content_type} to Korean ===")
+
+        # Step 1: Upload the file
+        print(f"📤 Uploading {file_name}...")
+        upload_success = self.upload_file_to_project(file_path)
+
+        if not upload_success:
+            print(f"⚠ Upload failed for {file_name}")
+            return ""
+
+        print(f"✓ {file_name} uploaded successfully")
+        time.sleep(3)  # Wait for upload to process
+
+        # Step 2: Translate using the uploaded file
+        print(f"🌐 Translating {content_type}...")
+
+        if content_type == "script":
+            # Longer wait and more detailed prompt for script
+            prompt = f"""Translate the ENTIRE English script from the uploaded file "{file_name}" to Korean.
+
+IMPORTANT REQUIREMENTS:
+- Translate the COMPLETE content from beginning to end
+- Maintain the storytelling style and dramatic tone
+- Keep all numbers, ages, and specific details accurate
+- Preserve the paragraph structure and formatting
+- Use natural, conversational Korean for seniors (60+)
+- Keep the same emotional impact and urgency
+
+JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
+
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=300,  # 5 minutes for full script
+                stabilization_wait=40,
+                max_stability_checks=25
+            )
+            korean_text = self.extract_generated_content(response, extract_all=True)
+        else:
+            # Shorter prompt for title/description
+            prompt = f"""Translate the content from the uploaded file "{file_name}" to Korean.
+
+Use natural Korean for seniors (60+).
+
+JUST OUTPUT THE KOREAN TRANSLATION. No English, no explanations."""
+
+            response = self.send_prompt_and_wait(prompt, wait_time=90)
+            korean_text = self.extract_generated_content(response, extract_all=True)
+
+        print(f"✓ {content_type.capitalize()} translated ({len(korean_text)} characters)")
+        return korean_text
+
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
         """Translate text to Korean using Claude.ai Project"""
         print(f"\nTranslating {content_type} to Korean...")
@@ -1611,54 +1665,38 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                 f.write(english_premise)
             print(f"✓ English premise saved to: {premise_path}")
 
-            # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
-            print("\n" + "="*60)
-            print("📤 UPLOADING SCRIPT TO CLAUDE PROJECT")
-            print("="*60)
-
-            upload_success = self.upload_file_to_project(str(script_path))
-            if upload_success:
-                print("✓ Script uploaded successfully - ready for translation")
-                time.sleep(3)  # Wait for upload to fully process
-            else:
-                print("⚠ Upload failed - will attempt translation without file reference")
-
             # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
             print("\n" + "="*60)
             print("🌐 PHASE 2: TRANSLATE ALL CONTENT TO KOREAN (Browser)")
             print("="*60)
-
-            korean_title = self.translate_to_korean_browser(english_title, "title")
-            time.sleep(5)
-
-            korean_description = self.translate_to_korean_browser(english_description, "description")
-            time.sleep(5)
+            print("Each file will be uploaded to Claude Project and translated one by one.\n")
 
             # NOTE: Premise is NOT translated - kept in English for internal use
-            print("ℹ️  Premise is kept in English (not translated)")
+            print("ℹ️  Note: Premise is kept in English (not translated)\n")
 
-            # Translate full script using uploaded file (not chunks)
-            korean_script = self.translate_script_to_korean_browser(str(script_path))
+            # 1. Upload title file → Translate → Save Korean title
+            korean_title = self.translate_file_to_korean_browser(str(title_path), "title")
+            if korean_title:
+                korean_title_path = self.working_dir / "video_title_korean.txt"
+                with open(korean_title_path, 'w', encoding='utf-8') as f:
+                    f.write(korean_title)
+                print(f"✓ Korean title saved to: {korean_title_path}\n")
 
-            # Save Korean title as separate file
-            korean_title_path = self.working_dir / "video_title_korean.txt"
-            with open(korean_title_path, 'w', encoding='utf-8') as f:
-                f.write(korean_title)
-            print(f"✓ Korean title saved to: {korean_title_path}")
+            # 2. Upload description file → Translate → Save Korean description
+            korean_description = self.translate_file_to_korean_browser(str(description_path), "description")
+            if korean_description:
+                korean_description_path = self.working_dir / "video_description_korean.txt"
+                with open(korean_description_path, 'w', encoding='utf-8') as f:
+                    f.write(korean_description)
+                print(f"✓ Korean description saved to: {korean_description_path}\n")
 
-            # Save Korean description as separate file
-            korean_description_path = self.working_dir / "video_description_korean.txt"
-            with open(korean_description_path, 'w', encoding='utf-8') as f:
-                f.write(korean_description)
-            print(f"✓ Korean description saved to: {korean_description_path}")
-
-            # Save Korean content (title, description, and script combined)
-            korean_script_path = self.working_dir / "video_script_korean.txt"
-            with open(korean_script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {korean_title}\n\n")
-                f.write(f"Description: {korean_description}\n\n")
-                f.write(f"Script:\n{korean_script}")
-            print(f"✓ Korean script (combined) saved to: {korean_script_path}")
+            # 3. Upload script file → Translate → Save Korean script
+            korean_script = self.translate_file_to_korean_browser(str(script_path), "script")
+            if korean_script:
+                korean_script_path = self.working_dir / "video_script_korean.txt"
+                with open(korean_script_path, 'w', encoding='utf-8') as f:
+                    f.write(korean_script)
+                print(f"✓ Korean script saved to: {korean_script_path}\n")
 
             # === CLOSE BROWSER ===
             print("\n🌐 Closing browser...")
