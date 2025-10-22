@@ -143,81 +143,189 @@ class VideoGenerationMacroBrowser:
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60) -> str:
         """Send a prompt to Claude and wait for response"""
         try:
-            # Find chat input
-            chat_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
-            )
+            # Retry logic for stale elements
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Find chat input (re-find each attempt to avoid stale reference)
+                    print(f"  Finding chat input (attempt {attempt + 1}/{max_retries})...")
+                    chat_input = WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
+                    )
+                    time.sleep(1)  # Let DOM settle
 
-            # Clear and send prompt
-            chat_input.clear()
-            chat_input.send_keys(prompt)
-            time.sleep(1)
+                    # Click to focus
+                    print(f"  Focusing input...")
+                    chat_input.click()
+                    time.sleep(0.5)
 
-            # Send message (Ctrl+Enter or Enter)
-            chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
-            time.sleep(2)
+                    # Clear the input using keyboard shortcuts
+                    print(f"  Clearing input...")
+                    chat_input.send_keys(Keys.CONTROL + "a")  # Select all
+                    time.sleep(0.3)
+                    chat_input.send_keys(Keys.BACKSPACE)  # Delete
+                    time.sleep(0.5)
 
-            # Wait for response to appear
-            print(f"  Waiting for Claude's response (max {wait_time}s)...")
-            time.sleep(5)  # Initial wait for processing
+                    # Type prompt character by character to avoid stale references
+                    print(f"  Typing prompt ({len(prompt)} chars)...")
+                    # Split into smaller chunks to reduce stale element risk
+                    chunk_size = 100
+                    for i in range(0, len(prompt), chunk_size):
+                        chunk = prompt[i:i+chunk_size]
+                        # Re-find element before each chunk
+                        chat_input = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true']")
+                        chat_input.send_keys(chunk)
+                        time.sleep(0.1)
+
+                    time.sleep(1)
+
+                    # Re-find element before sending (most critical step)
+                    print(f"  Sending message...")
+                    chat_input = self.driver.find_element(By.CSS_SELECTOR, "div[contenteditable='true']")
+                    chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
+                    time.sleep(2)
+
+                    # If we got here, we succeeded
+                    print(f"  ✓ Message sent successfully")
+                    break
+
+                except Exception as e:
+                    if "stale element" in str(e).lower() and attempt < max_retries - 1:
+                        print(f"  ⚠ Stale element, retrying... ({attempt + 1}/{max_retries})")
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise  # Re-raise if not stale or out of retries
+
+            # Wait for response to start appearing
+            print(f"  Waiting for Claude to start generating...")
+            time.sleep(3)
 
             # Wait for "Stop generating" button to disappear (indicates completion)
+            print(f"  Monitoring generation progress (max {wait_time}s)...")
             max_wait = wait_time
             start_time = time.time()
+            generation_detected = False
 
             while time.time() - start_time < max_wait:
                 try:
                     # Check if still generating
                     stop_button = self.driver.find_elements(By.XPATH, "//button[contains(., 'Stop')]")
-                    if not stop_button:
+
+                    if stop_button and not generation_detected:
+                        print(f"  ⏳ Claude is generating...")
+                        generation_detected = True
+
+                    if not stop_button and generation_detected:
                         # Response complete
+                        print(f"  ✓ Generation complete!")
                         break
+                    elif not stop_button and not generation_detected:
+                        # Check if response already appeared (fast response)
+                        messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
+                        if len(messages) > 0:
+                            print(f"  ✓ Response detected!")
+                            break
                 except:
                     pass
+
+                elapsed = int(time.time() - start_time)
+                if elapsed % 10 == 0 and elapsed > 0:  # Progress update every 10 seconds
+                    print(f"  ... still waiting ({elapsed}s elapsed)")
+
                 time.sleep(2)
 
-            # Extract the last response
-            time.sleep(3)  # Wait for DOM to settle
+            # Extra wait for DOM to fully settle after generation
+            print(f"  Extracting response text...")
+            time.sleep(3)
 
-            # Try multiple selectors to find Claude's response
+            # Try multiple selectors to find Claude's response (with retries)
             response_text = ""
+            extraction_attempts = 3
 
-            # Try method 1: data-test-render-count
-            messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
-            if messages:
-                last_message = messages[-1]
-                response_text = last_message.text.strip()
-                print(f"  [DEBUG] Captured response (method 1): {response_text[:100]}...")
+            for extract_attempt in range(extraction_attempts):
+                if extract_attempt > 0:
+                    print(f"  Retry extraction attempt {extract_attempt + 1}/{extraction_attempts}...")
+                    time.sleep(2)
 
-            # Try method 2: Find by class name (common pattern)
-            if not response_text:
-                messages = self.driver.find_elements(By.CSS_SELECTOR, "div.font-claude-message")
-                if messages:
-                    last_message = messages[-1]
-                    response_text = last_message.text.strip()
-                    print(f"  [DEBUG] Captured response (method 2): {response_text[:100]}...")
+                # Try method 1: data-test-render-count
+                if not response_text:
+                    messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
+                    if messages:
+                        last_message = messages[-1]
+                        response_text = last_message.text.strip()
+                        if response_text:
+                            print(f"  [DEBUG] Captured response (method 1): {response_text[:100]}...")
 
-            # Try method 3: Find all divs with substantial text content
-            if not response_text:
-                all_divs = self.driver.find_elements(By.TAG_NAME, "div")
-                for div in reversed(all_divs):  # Check from bottom up
-                    text = div.text.strip()
-                    if len(text) > 20 and text != prompt[:100]:  # Not the prompt itself
-                        response_text = text
-                        print(f"  [DEBUG] Captured response (method 3): {response_text[:100]}...")
-                        break
+                # Try method 2: Find by class name (common pattern)
+                if not response_text:
+                    messages = self.driver.find_elements(By.CSS_SELECTOR, "div.font-claude-message")
+                    if messages:
+                        last_message = messages[-1]
+                        response_text = last_message.text.strip()
+                        if response_text:
+                            print(f"  [DEBUG] Captured response (method 2): {response_text[:100]}...")
+
+                # Try method 3: Look for assistant message container
+                if not response_text:
+                    # Look for common assistant message patterns
+                    selectors_to_try = [
+                        "div[class*='assistant']",
+                        "div[class*='message']",
+                        "div[role='article']",
+                        "div[class*='response']"
+                    ]
+                    for selector in selectors_to_try:
+                        messages = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                        if messages:
+                            # Get last message that's not the prompt
+                            for msg in reversed(messages):
+                                text = msg.text.strip()
+                                if text and len(text) > 20 and prompt[:50] not in text:
+                                    response_text = text
+                                    print(f"  [DEBUG] Captured response (method 3, selector {selector}): {response_text[:100]}...")
+                                    break
+                        if response_text:
+                            break
+
+                # Try method 4: Find all divs with substantial text content
+                if not response_text:
+                    all_divs = self.driver.find_elements(By.TAG_NAME, "div")
+                    for div in reversed(all_divs):  # Check from bottom up
+                        text = div.text.strip()
+                        # More robust check: not empty, substantial length, not the prompt
+                        if text and len(text) > 20 and prompt[:50] not in text and len(text) < 10000:
+                            response_text = text
+                            print(f"  [DEBUG] Captured response (method 4): {response_text[:100]}...")
+                            break
+
+                if response_text:
+                    break  # Got a response, stop retrying
 
             if response_text:
                 print(f"  ✓ Response captured ({len(response_text)} characters)")
                 return response_text
             else:
-                print("  ⚠ Could not extract response text from any method")
+                print("  ✗ Could not extract response text from any method after all retries")
+                print("  ⚠ Saving screenshot for debugging...")
+                try:
+                    screenshot_path = f"debug_screenshot_{int(time.time())}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    print(f"  Screenshot saved: {screenshot_path}")
+                except:
+                    pass
                 print("  ⚠ Trying to get page source for debugging...")
                 # Last resort - get full page text
-                body = self.driver.find_element(By.TAG_NAME, "body")
-                page_text = body.text
-                print(f"  [DEBUG] Full page text length: {len(page_text)}")
-                print(f"  [DEBUG] Last 500 chars: ...{page_text[-500:]}")
+                try:
+                    body = self.driver.find_element(By.TAG_NAME, "body")
+                    page_text = body.text
+                    print(f"  [DEBUG] Full page text length: {len(page_text)}")
+                    if len(page_text) > 500:
+                        print(f"  [DEBUG] Last 500 chars: ...{page_text[-500:]}")
+                    else:
+                        print(f"  [DEBUG] Full text: {page_text}")
+                except Exception as e:
+                    print(f"  [DEBUG] Could not get page text: {e}")
                 return ""
 
         except Exception as e:
