@@ -904,8 +904,21 @@ Generate the ADDITIONAL content only:"""
         if total_words > 7000:
             print(f"\nWord count ({total_words}) exceeds target. Trimming to ~7000 words...")
             words = full_script.split()
-            full_script = " ".join(words[:7000])
-            total_words = 7000
+            trimmed_text = " ".join(words[:7000])
+
+            # Find the last complete sentence (ending with . ! or ?)
+            # This prevents cutting off mid-sentence
+            last_period = max(trimmed_text.rfind('.'), trimmed_text.rfind('!'), trimmed_text.rfind('?'))
+
+            if last_period > 0:
+                # Trim to the last complete sentence
+                full_script = trimmed_text[:last_period + 1]
+            else:
+                # Fallback if no sentence ending found
+                full_script = trimmed_text
+
+            total_words = len(full_script.split())
+            print(f"  Trimmed to {total_words} words (ended at complete sentence)")
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
