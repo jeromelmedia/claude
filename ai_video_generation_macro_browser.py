@@ -266,30 +266,59 @@ class VideoGenerationMacroBrowser:
             print("  Stabilizing...")
             time.sleep(stabilization_wait)
 
-            # Check if text is still changing (wait until stable)
+            # Check if the LATEST MESSAGE is still changing (wait until stable)
             stable_count = 0
-            last_text_length = 0
+            last_message_length = 0
 
             for stability_check in range(max_stability_checks):
                 try:
-                    # Get current text length
-                    current_js = "return document.body.innerText.length;"
-                    current_length = self.driver.execute_script(current_js)
+                    # Get the latest message text length (not entire page)
+                    latest_message_js = """
+                    var selectors = [
+                        'div[data-test-render-count]',
+                        'div[class*="Message"]',
+                        'div[class*="message"]',
+                        'div[role="article"]'
+                    ];
 
-                    if current_length == last_text_length:
+                    var latestMsg = null;
+                    var maxLength = 0;
+
+                    for (var i = 0; i < selectors.length; i++) {
+                        var elements = document.querySelectorAll(selectors[i]);
+                        if (elements.length > 0) {
+                            var lastElement = elements[elements.length - 1];
+                            var text = lastElement.innerText || lastElement.textContent || '';
+                            if (text.length > maxLength) {
+                                maxLength = text.length;
+                                latestMsg = text;
+                            }
+                        }
+                    }
+
+                    return latestMsg ? latestMsg.length : 0;
+                    """
+                    current_message_length = self.driver.execute_script(latest_message_js)
+
+                    if current_message_length == last_message_length and current_message_length > 0:
                         stable_count += 1
-                        if stable_count >= 3:
+                        if stable_count >= 5:  # Increased from 3 to 5 for more confidence
+                            print(f"  Response stable ({current_message_length} chars)")
                             break
                     else:
+                        if current_message_length > last_message_length:
+                            print(f"  Still generating... ({current_message_length} chars)")
                         stable_count = 0
 
-                    last_text_length = current_length
-                    time.sleep(3)  # Increased from 2 to 3 seconds between checks
-                except:
-                    time.sleep(3)
+                    last_message_length = current_message_length
+                    time.sleep(4)  # Increased from 3 to 4 seconds between checks
+                except Exception as e:
+                    print(f"  Stability check error: {e}")
+                    time.sleep(4)
 
-            # Final wait for DOM to settle
-            time.sleep(3)
+            # Final wait for DOM to settle and any final rendering
+            print("  Final stabilization...")
+            time.sleep(5)  # Increased from 3 to 5 seconds
 
             # Use JavaScript to extract response - MUCH more reliable!
             response_text = ""
@@ -555,7 +584,12 @@ Create ONE title in pure English following that style.
 
 JUST OUTPUT THE TITLE. No explanations."""
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=90,
+                stabilization_wait=25,
+                max_stability_checks=20
+            )
 
             # Parse the response to extract JUST the title (not Claude's thinking/searching)
             title = self.extract_generated_content(response)
@@ -581,7 +615,12 @@ User wants this change: {modification}
 
 Generate the modified title. JUST OUTPUT THE NEW TITLE."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=90,
+                    stabilization_wait=25,
+                    max_stability_checks=20
+                )
                 title = self.extract_generated_content(response)
                 print(f"\nModified Title:\n{title}\n")
 
@@ -629,7 +668,12 @@ Write in pure English following that style.
 
 JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE."""
 
-            response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=180,  # 3 minutes for long descriptions
+                stabilization_wait=30,  # Extra long initial wait
+                max_stability_checks=30  # More checks to ensure completion
+            )
             description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
 
             print(f"\nGenerated Description:\n{description}\n")
@@ -650,7 +694,12 @@ User wants this change: {modification}
 
 Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=180,
+                    stabilization_wait=30,
+                    max_stability_checks=30
+                )
                 description = self.extract_generated_content(response, extract_all=True)  # Get full description
                 print(f"\nModified Description:\n{description}\n")
 
@@ -686,7 +735,12 @@ LANGUAGE REQUIREMENTS:
 
 JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=90,
+                stabilization_wait=25,
+                max_stability_checks=20
+            )
             premise = self.extract_generated_content(response)
 
             print(f"\nGenerated Premise:\n{premise}\n")
@@ -707,7 +761,12 @@ User wants this change: {modification}
 
 Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=90,
+                    stabilization_wait=25,
+                    max_stability_checks=20
+                )
                 premise = self.extract_generated_content(response)
                 print(f"\nModified Premise:\n{premise}\n")
 
@@ -832,7 +891,12 @@ Current script:
 
 Generate the ADDITIONAL content only:"""
 
-            additional = self.send_prompt_and_wait(additional_prompt, wait_time=120)
+            additional = self.send_prompt_and_wait(
+                additional_prompt,
+                wait_time=240,
+                stabilization_wait=35,
+                max_stability_checks=30
+            )
             full_script += "\n\n" + additional
             total_words = len(full_script.split())
             print(f"Updated word count: {total_words}")
@@ -888,7 +952,12 @@ Generate the modified FULL script incorporating this change. Keep it 6000-7000 w
 
 JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=180)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=300,
+                    stabilization_wait=40,
+                    max_stability_checks=35
+                )
                 full_script = response.strip()
                 total_words = len(full_script.split())
 
@@ -918,7 +987,22 @@ Translate to natural Korean for seniors (60+):
 
 JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
-        response = self.send_prompt_and_wait(prompt, wait_time=90)
+        # Increase wait times based on content type
+        if content_type == "description":
+            wait_time = 180
+            stabilization = 30
+            checks = 30
+        else:
+            wait_time = 120
+            stabilization = 25
+            checks = 25
+
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=wait_time,
+            stabilization_wait=stabilization,
+            max_stability_checks=checks
+        )
         return response.strip()
 
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
@@ -939,9 +1023,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=300,  # 5 minutes for full script translation
-            stabilization_wait=40,  # Extra long wait for large translation
-            max_stability_checks=25  # More checks for translation
+            wait_time=360,  # 6 minutes for full script translation
+            stabilization_wait=45,  # Extra long wait for large translation
+            max_stability_checks=35  # More checks for translation to ensure complete
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
