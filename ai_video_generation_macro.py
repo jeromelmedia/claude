@@ -450,12 +450,10 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             print("  ⏱ Waiting 65 seconds to avoid rate limit...")
             time.sleep(65)
 
-        # If over 7000 words, trim
+        # Accept the full script length (no trimming)
+        # The voiceover API can handle longer scripts, and we don't want to cut off important content
         if total_words > 7000:
-            print(f"\nWord count ({total_words}) exceeds target. Trimming to ~7000 words...")
-            words = full_script.split()
-            full_script = " ".join(words[:7000])
-            total_words = 7000
+            print(f"\n✓ Script is {total_words} words (above 7000 word target, but keeping full content)")
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
