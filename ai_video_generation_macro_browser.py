@@ -769,6 +769,15 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 - Use "you" language and conversational style
 - Scientific explanations in simple terms
 
+CRITICAL - KOREAN CONTEXT ONLY:
+- The doctor is from KOREA (not America)
+- ALL patient stories must be Korean patients with Korean names (Kim, Park, Lee, Choi, etc.)
+- ALL locations must be in Korea (Seoul, Busan, hospitals in Korea, etc.)
+- Use Korean cultural context and references
+- Mention Korean healthcare system when relevant
+- NO American names, cities, or locations
+- The doctor practices in Korea and treats Korean patients
+
 JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
         print(f"  Generating segment {segment_num}/{total_segments}...")
@@ -1539,20 +1548,20 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             korean_description = self.translate_to_korean_browser(english_description, "description")
             time.sleep(5)
 
-            korean_premise = self.translate_to_korean_browser(english_premise, "premise")
-            time.sleep(5)
+            # NOTE: Premise is NOT translated - kept in English for internal use
+            print("ℹ️  Premise is kept in English (not translated)")
 
             # Translate full script using uploaded file (not chunks)
             korean_script = self.translate_script_to_korean_browser(str(script_path))
 
-            # Save Korean content
+            # Save Korean content (title, description, and script only - NO premise)
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
                 f.write(f"Title: {korean_title}\n\n")
                 f.write(f"Description: {korean_description}\n\n")
-                f.write(f"Premise: {korean_premise}\n\n")
                 f.write(f"Script:\n{korean_script}")
             print(f"✓ Korean script saved to: {korean_script_path}")
+            print("   (Contains: Title, Description, and Script in Korean)")
 
             # === CLOSE BROWSER ===
             print("\n🌐 Closing browser...")
