@@ -1492,8 +1492,10 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         # Remove leading/trailing dots and spaces
         filename = filename.strip('. ')
 
-        # Truncate to reasonable length
-        max_length = 100
+        # Truncate to reasonable length (50 chars to avoid Windows MAX_PATH issues)
+        # Windows has a 260 character path limit, and with long base paths,
+        # folder names need to be much shorter to avoid "File not found" errors
+        max_length = 50
         if len(filename) > max_length:
             filename = filename[:max_length].strip()
 
