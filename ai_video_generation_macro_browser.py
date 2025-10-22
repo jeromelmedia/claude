@@ -471,10 +471,15 @@ class VideoGenerationMacroBrowser:
             traceback.print_exc()
             return ""
 
-    def extract_generated_content(self, response: str) -> str:
+    def extract_generated_content(self, response: str, extract_all: bool = False) -> str:
         """
         Extract the actual generated content from Claude's response,
         filtering out thinking, searching, and explanatory text.
+
+        Args:
+            response: The raw response from Claude
+            extract_all: If True, return ALL content lines (for scripts).
+                        If False, return only the last line (for titles/descriptions).
         """
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
@@ -492,7 +497,10 @@ class VideoGenerationMacroBrowser:
             'I can see',
             'Looking at',
             'relevant sections',
-            'results'
+            'results',
+            'Show working file',
+            'TEXT',
+            'relevant sections'
         ]
 
         # Collect candidate lines (not process text)
@@ -514,12 +522,18 @@ class VideoGenerationMacroBrowser:
             if not is_process and len(line_stripped) > 15:
                 candidates.append(line_stripped)
 
-        # The actual content is usually the LAST substantial line
+        # Return based on extract_all parameter
         if candidates:
-            # Return the last candidate line
-            result = candidates[-1].strip('"\'')
-            print(f"  [DEBUG] Extracted from {len(candidates)} candidate lines")
-            return result
+            if extract_all:
+                # For scripts: return ALL candidate lines joined together
+                result = '\n\n'.join(candidates)
+                print(f"  [DEBUG] Extracted ALL {len(candidates)} content lines (script mode)")
+                return result
+            else:
+                # For titles/descriptions: return only the LAST line
+                result = candidates[-1].strip('"\'')
+                print(f"  [DEBUG] Extracted LAST line from {len(candidates)} candidate lines")
+                return result
 
         # Fallback: Look for content after common intro phrases
         for intro in ['title:', 'here\'s an', 'here is', ':']:
@@ -546,10 +560,12 @@ class VideoGenerationMacroBrowser:
             prompt = """Generate a YouTube video title in English.
 
 Use the "korean video titles.txt" file in this project as reference for:
-- Topics to cover (health, finance, lifestyle for seniors 60+)
+- Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
 - Title structure and format
 - Tone and urgency level
 - Use of numbers and specific details
+
+The host is a DOCTOR, so focus on health and lifestyle topics only.
 
 Create ONE title in English following that style.
 
@@ -739,9 +755,10 @@ JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segmen
 
         print(f"  Generating segment {segment_num}/{total_segments}...")
         response = self.send_prompt_and_wait(prompt, wait_time=180)  # 3 minutes for long segments
-        segment_text = self.extract_generated_content(response)
+        segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
 
-        print(f"  ✓ Segment {segment_num} generated ({len(segment_text)} characters)")
+        word_count = len(segment_text.split())
+        print(f"  ✓ Segment {segment_num} generated ({len(segment_text)} characters, ~{word_count} words)")
         return segment_text
 
     def _get_segment_focus(self, segment_num: int, total_segments: int) -> str:
