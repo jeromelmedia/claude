@@ -1393,11 +1393,12 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
         print(f"Duration: {voiceover_duration:.2f}s")
         print(f"Images: {len(image_paths)}\n")
 
-        working_dir = Path(output_path).parent
-        temp_looped = working_dir / "temp_looped.mp4"
-        temp_concat_list = working_dir / "concat_list.txt"
-        temp_concatenated = working_dir / "temp_concatenated.mp4"
-        temp_with_subs = working_dir / "temp_with_subs.mp4"
+        # IMPORTANT: Resolve all paths to absolute before os.chdir() to avoid path duplication
+        working_dir = Path(output_path).parent.resolve()
+        temp_looped = (working_dir / "temp_looped.mp4").resolve()
+        temp_concat_list = (working_dir / "concat_list.txt").resolve()
+        temp_concatenated = (working_dir / "temp_concatenated.mp4").resolve()
+        temp_with_subs = (working_dir / "temp_with_subs.mp4").resolve()
 
         try:
             # Step 1: Create 90-second looped video
@@ -1424,7 +1425,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
                 image_segments = []
                 for i, img_path in enumerate(image_paths, 1):
-                    temp_img_video = working_dir / f"temp_image_{i}.mp4"
+                    temp_img_video = (working_dir / f"temp_image_{i}.mp4").resolve()
 
                     img_cmd = [
                         'ffmpeg', '-y',
@@ -1445,9 +1446,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
             # Create concat list
             with open(temp_concat_list, 'w', encoding='utf-8') as f:
-                f.write(f"file '{temp_looped.absolute()}'\n")
+                f.write(f"file '{temp_looped}'\n")
                 for seg in image_segments:
-                    f.write(f"file '{seg.absolute()}'\n")
+                    f.write(f"file '{seg}'\n")
 
             concat_cmd = [
                 'ffmpeg', '-y',
@@ -1463,7 +1464,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             print("[4/6] Burning subtitles...")
 
             # Use a different approach: copy subtitles to working dir with simple name to avoid path escaping issues
-            simple_subtitle_path = working_dir / "subs.srt"
+            simple_subtitle_path = (working_dir / "subs.srt").resolve()
             import shutil
             shutil.copy(subtitle_path, simple_subtitle_path)
 
@@ -1479,11 +1480,11 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             try:
                 subtitle_cmd = [
                     'ffmpeg', '-y',
-                    '-i', str(temp_concatenated.absolute()),
+                    '-i', str(temp_concatenated),
                     '-vf', subtitle_filter,
                     '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                     '-c:a', 'copy',
-                    str(temp_with_subs.absolute())
+                    str(temp_with_subs)
                 ]
                 subprocess.run(subtitle_cmd, capture_output=True, check=True)
             finally:
