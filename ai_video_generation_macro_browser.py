@@ -13,7 +13,7 @@ import requests
 import subprocess
 import random
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
@@ -56,27 +56,70 @@ class VideoGenerationMacroBrowser:
             return json.load(f)
 
     def init_browser(self):
-        """Initialize Chrome browser with user profile"""
+        """Initialize Chrome browser with persistent profile for automation"""
         print("\n🌐 Initializing browser...")
 
         chrome_options = Options()
 
-        # Use user's Chrome profile if specified
-        chrome_profile = self.config.get("chrome_profile_path", "")
-        if chrome_profile:
-            # Extract profile directory and profile name
-            profile_dir = str(Path(chrome_profile).parent)
-            profile_name = Path(chrome_profile).name
-            chrome_options.add_argument(f"user-data-dir={profile_dir}")
-            if profile_name != "Default":
-                chrome_options.add_argument(f"profile-directory={profile_name}")
+        # Create a dedicated Chrome profile directory for this automation
+        # This keeps you logged in between runs WITHOUT conflicting with your main Chrome
+        automation_profile_dir = Path("./chrome_automation_profile").absolute()
+        automation_profile_dir.mkdir(exist_ok=True)
 
-        # Other options
+        print(f"Using automation profile: {automation_profile_dir}")
+        print("(This keeps you logged in between runs)")
+
+        # Use the dedicated profile directory
+        chrome_options.add_argument(f"user-data-dir={automation_profile_dir}")
+
+        # Add compatibility options
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--start-maximized")
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        self.driver = webdriver.Chrome(options=chrome_options)
-        print("✓ Browser initialized")
+        try:
+            self.driver = webdriver.Chrome(options=chrome_options)
+            print("✓ Browser initialized")
+        except Exception as e:
+            error_msg = str(e)
+
+            if "user data directory is already in use" in error_msg.lower():
+                print(f"\n✗ Chrome automation profile is already in use!")
+                print("\n⚠️  SOLUTION: Close the automation browser window and try again.")
+                print("\nLook for a Chrome window that was opened by this script and close it.")
+                print("Then run the script again.")
+
+                # Try to kill Chrome processes using this profile (Windows)
+                if sys.platform == 'win32':
+                    print("\nAttempting to close Chrome processes...")
+                    try:
+                        subprocess.run(['taskkill', '/F', '/IM', 'chrome.exe'],
+                                     capture_output=True, timeout=5)
+                        print("✓ Chrome processes closed. Please wait 5 seconds...")
+                        time.sleep(5)
+
+                        # Retry once
+                        print("Retrying browser initialization...")
+                        self.driver = webdriver.Chrome(options=chrome_options)
+                        print("✓ Browser initialized successfully!")
+                        return
+                    except:
+                        pass
+
+                print("\nIf the problem persists, restart your computer.")
+                raise
+            else:
+                print(f"\n✗ Failed to initialize Chrome: {e}")
+                print("\nTroubleshooting:")
+                print("1. Make sure Chrome is installed")
+                print("2. Close ALL Chrome windows")
+                print("3. Update Chrome to latest version")
+                print("4. Try: pip install --upgrade selenium")
+                raise
 
     def navigate_to_project(self):
         """Navigate to Claude.ai Project"""
@@ -100,146 +143,558 @@ class VideoGenerationMacroBrowser:
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60) -> str:
         """Send a prompt to Claude and wait for response"""
         try:
-            # Find chat input
-            chat_input = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
-            )
+            # Retry logic for DOM issues
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    # Find chat input
+                    print(f"  Finding chat input (attempt {attempt + 1}/{max_retries})...")
+                    chat_input = WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "div[contenteditable='true']"))
+                    )
+                    time.sleep(1)
 
-            # Clear and send prompt
-            chat_input.clear()
-            chat_input.send_keys(prompt)
-            time.sleep(1)
+                    # Click to focus
+                    print(f"  Focusing input...")
+                    chat_input.click()
+                    time.sleep(0.5)
 
-            # Send message (Ctrl+Enter or Enter)
-            chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
-            time.sleep(2)
+                    # Use JavaScript to set the text content directly (much more reliable than typing)
+                    print(f"  Setting prompt text via JavaScript ({len(prompt)} chars)...")
+                    # Escape single quotes in the prompt for JavaScript
+                    escaped_prompt = prompt.replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
 
-            # Wait for response to appear
-            print(f"  Waiting for Claude's response (max {wait_time}s)...")
-            time.sleep(5)  # Initial wait for processing
+                    # Set the text content using JavaScript
+                    js_script = f"""
+                    var element = arguments[0];
+                    element.textContent = '{escaped_prompt}';
+
+                    // Trigger input event to notify React/Vue that content changed
+                    var event = new Event('input', {{ bubbles: true }});
+                    element.dispatchEvent(event);
+                    """
+
+                    self.driver.execute_script(js_script, chat_input)
+                    time.sleep(1)
+
+                    # Now send the message - try both keyboard and button click
+                    print(f"  Sending message...")
+
+                    # Method 1: Try keyboard shortcut
+                    try:
+                        chat_input.click()
+                        time.sleep(0.3)
+                        chat_input.send_keys(Keys.CONTROL + Keys.RETURN)
+                        print(f"  Sent via keyboard (Ctrl+Enter)")
+                    except:
+                        # Method 2: Find and click the send button
+                        print(f"  Keyboard send failed, trying button click...")
+                        try:
+                            # Look for send button (various possible selectors)
+                            send_button = None
+                            button_selectors = [
+                                "button[aria-label*='Send']",
+                                "button[type='submit']",
+                                "button:has(svg)",  # Send buttons often have SVG icons
+                                "button[class*='send']"
+                            ]
+
+                            for selector in button_selectors:
+                                buttons = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                                if buttons:
+                                    send_button = buttons[-1]  # Usually the last one
+                                    break
+
+                            if send_button:
+                                send_button.click()
+                                print(f"  Sent via button click")
+                            else:
+                                print(f"  ⚠ Could not find send button, message may not have been sent")
+                        except Exception as e:
+                            print(f"  ⚠ Button click also failed: {e}")
+
+                    time.sleep(2)
+
+                    # If we got here, we succeeded
+                    print(f"  ✓ Message sent successfully")
+                    break
+
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if ("stale element" in error_msg or "no such element" in error_msg) and attempt < max_retries - 1:
+                        print(f"  ⚠ Element issue, retrying... ({attempt + 1}/{max_retries})")
+                        time.sleep(2)
+                        continue
+                    else:
+                        raise  # Re-raise if not a retryable error or out of retries
+
+            # Wait for response to start appearing
+            print(f"  Waiting for Claude to start generating...")
+            time.sleep(3)
 
             # Wait for "Stop generating" button to disappear (indicates completion)
+            print(f"  Monitoring generation progress (max {wait_time}s)...")
             max_wait = wait_time
             start_time = time.time()
+            generation_detected = False
 
             while time.time() - start_time < max_wait:
                 try:
                     # Check if still generating
                     stop_button = self.driver.find_elements(By.XPATH, "//button[contains(., 'Stop')]")
-                    if not stop_button:
+
+                    if stop_button and not generation_detected:
+                        print(f"  ⏳ Claude is generating...")
+                        generation_detected = True
+
+                    if not stop_button and generation_detected:
                         # Response complete
+                        print(f"  ✓ Generation complete!")
                         break
+                    elif not stop_button and not generation_detected:
+                        # Check if response already appeared (fast response)
+                        messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
+                        if len(messages) > 0:
+                            print(f"  ✓ Response detected!")
+                            break
                 except:
                     pass
+
+                elapsed = int(time.time() - start_time)
+                if elapsed % 10 == 0 and elapsed > 0:  # Progress update every 10 seconds
+                    print(f"  ... still waiting ({elapsed}s elapsed)")
+
                 time.sleep(2)
 
-            # Extract the last response
-            time.sleep(2)  # Wait for DOM to settle
+            # Extra wait for DOM to fully settle after generation
+            print(f"  Extracting response text...")
+            time.sleep(3)
 
-            # Get all message divs
-            messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
+            # Use JavaScript to extract response - MUCH more reliable!
+            response_text = ""
+            extraction_attempts = 5
 
-            if messages:
-                # Get the last message (Claude's response)
-                last_message = messages[-1]
-                response_text = last_message.text
+            for extract_attempt in range(extraction_attempts):
+                if extract_attempt > 0:
+                    print(f"  Retry extraction attempt {extract_attempt + 1}/{extraction_attempts}...")
+                    time.sleep(3)
+
+                # JavaScript approach - scan the DOM and extract last message
+                js_extract_script = """
+                // Find all potential message containers
+                var selectors = [
+                    'div[data-test-render-count]',
+                    'div[class*="Message"]',
+                    'div[class*="message"]',
+                    'div[role="article"]',
+                    'div[class*="assistant"]',
+                    'div[class*="response"]'
+                ];
+
+                var allMessages = [];
+
+                for (var i = 0; i < selectors.length; i++) {
+                    var elements = document.querySelectorAll(selectors[i]);
+                    for (var j = 0; j < elements.length; j++) {
+                        var text = elements[j].innerText || elements[j].textContent;
+                        if (text && text.length > 20) {
+                            allMessages.push({
+                                text: text.trim(),
+                                length: text.length,
+                                selector: selectors[i],
+                                index: j
+                            });
+                        }
+                    }
+                }
+
+                // Return the last non-empty message
+                if (allMessages.length > 0) {
+                    // Sort by appearance order and get last
+                    var lastMsg = allMessages[allMessages.length - 1];
+                    return JSON.stringify({
+                        success: true,
+                        text: lastMsg.text,
+                        method: lastMsg.selector,
+                        count: allMessages.length
+                    });
+                }
+
+                return JSON.stringify({success: false, text: '', count: 0});
+                """
+
+                try:
+                    result_json = self.driver.execute_script(js_extract_script)
+                    result = json.loads(result_json)
+
+                    print(f"  [DEBUG] JavaScript extraction: found {result.get('count', 0)} messages")
+
+                    if result.get('success') and result.get('text'):
+                        response_text = result['text'].strip()
+                        method = result.get('method', 'unknown')
+                        print(f"  [DEBUG] Extracted via JS (selector: {method})")
+                        print(f"  [DEBUG] Response preview: {response_text[:150]}...")
+                        break
+
+                except Exception as e:
+                    print(f"  [DEBUG] JS extraction error: {e}")
+
+                # Fallback: Try direct Selenium element finding
+                if not response_text:
+                    print(f"  [DEBUG] Trying Selenium fallback...")
+                    all_divs = self.driver.find_elements(By.TAG_NAME, "div")
+                    print(f"  [DEBUG] Found {len(all_divs)} total divs on page")
+
+                    for div in reversed(all_divs):
+                        try:
+                            text = div.text.strip()
+                            if text and len(text) > 20 and len(text) < 5000:
+                                # Don't include if it contains the prompt
+                                if prompt[:30] not in text:
+                                    response_text = text
+                                    print(f"  [DEBUG] Selenium fallback found text: {response_text[:100]}...")
+                                    break
+                        except:
+                            continue
+
+                if response_text:
+                    break  # Got a response, stop retrying
+
+            if response_text:
+                print(f"  ✓ Response captured ({len(response_text)} characters)")
                 return response_text
             else:
-                print("⚠ Could not find response")
+                print("\n" + "="*60)
+                print("  ✗✗✗ EXTRACTION FAILED AFTER ALL RETRIES ✗✗✗")
+                print("="*60)
+
+                timestamp = int(time.time())
+
+                # Save screenshot
+                print("\n  📸 Saving screenshot for debugging...")
+                try:
+                    screenshot_path = f"debug_screenshot_{timestamp}.png"
+                    self.driver.save_screenshot(screenshot_path)
+                    print(f"  ✓ Screenshot saved: {screenshot_path}")
+                except Exception as e:
+                    print(f"  ✗ Screenshot failed: {e}")
+
+                # Save page HTML
+                print("\n  📄 Saving page HTML for debugging...")
+                try:
+                    html_path = f"debug_page_{timestamp}.html"
+                    with open(html_path, 'w', encoding='utf-8') as f:
+                        f.write(self.driver.page_source)
+                    print(f"  ✓ HTML saved: {html_path}")
+                except Exception as e:
+                    print(f"  ✗ HTML save failed: {e}")
+
+                # Get page text
+                print("\n  📝 Extracting visible page text...")
+                try:
+                    body = self.driver.find_element(By.TAG_NAME, "body")
+                    page_text = body.text
+                    print(f"  [DEBUG] Full page text length: {len(page_text)}")
+
+                    # Save to file
+                    text_path = f"debug_text_{timestamp}.txt"
+                    with open(text_path, 'w', encoding='utf-8') as f:
+                        f.write(page_text)
+                    print(f"  ✓ Page text saved: {text_path}")
+
+                    if len(page_text) > 500:
+                        print(f"\n  Last 500 chars from page:\n  {page_text[-500:]}")
+                    else:
+                        print(f"\n  Full page text:\n  {page_text}")
+
+                except Exception as e:
+                    print(f"  ✗ Could not get page text: {e}")
+
+                # Try one more time with a super aggressive JavaScript scan
+                print("\n  🔍 Final attempt with aggressive JS scan...")
+                try:
+                    aggressive_js = """
+                    // Get ALL text from the page
+                    var allText = document.body.innerText || document.body.textContent;
+                    return allText;
+                    """
+                    all_text = self.driver.execute_script(aggressive_js)
+                    if all_text and len(all_text) > 50:
+                        print(f"  [DEBUG] Aggressive JS got {len(all_text)} chars")
+                        print(f"  [DEBUG] Text preview: {all_text[:300]}...")
+                        # Use this as last resort
+                        response_text = all_text.strip()
+                        print(f"  ⚠ Using full page text as fallback response")
+                        return response_text
+                except Exception as e:
+                    print(f"  ✗ Aggressive JS failed: {e}")
+
+                print("\n" + "="*60)
+                print("  Check the debug files above to see what's on the page!")
+                print("="*60 + "\n")
                 return ""
 
         except Exception as e:
             print(f"✗ Error sending prompt: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
 
+    def extract_generated_content(self, response: str) -> str:
+        """
+        Extract the actual generated content from Claude's response,
+        filtering out thinking, searching, and explanatory text.
+        """
+        # Remove common Claude prefixes/explanations
+        lines = response.split('\n')
+
+        # Filter out lines that are clearly Claude's internal process
+        skip_patterns = [
+            'I need to',
+            'I\'ll search',
+            'Let me',
+            'Searched project',
+            'Searching for',
+            'Based on',
+            'Here\'s',
+            'According to',
+            'I can see',
+            'Looking at',
+            'relevant sections',
+            'results'
+        ]
+
+        # Collect candidate lines (not process text)
+        candidates = []
+        for line in lines:
+            line_stripped = line.strip()
+
+            # Skip empty lines
+            if not line_stripped:
+                continue
+
+            # Skip lines that match process patterns
+            is_process = False
+            for pattern in skip_patterns:
+                if line_stripped.startswith(pattern):
+                    is_process = True
+                    break
+
+            if not is_process and len(line_stripped) > 15:
+                candidates.append(line_stripped)
+
+        # The actual content is usually the LAST substantial line
+        if candidates:
+            # Return the last candidate line
+            result = candidates[-1].strip('"\'')
+            print(f"  [DEBUG] Extracted from {len(candidates)} candidate lines")
+            return result
+
+        # Fallback: Look for content after common intro phrases
+        for intro in ['title:', 'here\'s an', 'here is', ':']:
+            if intro in response.lower():
+                parts = response.lower().split(intro)
+                if len(parts) > 1:
+                    # Get everything after the intro phrase
+                    content = response[response.lower().index(intro) + len(intro):].strip()
+                    # Get first line of that
+                    first_line = content.split('\n')[0].strip().strip('"\'')
+                    if first_line:
+                        print(f"  [DEBUG] Extracted after intro phrase '{intro}'")
+                        return first_line
+
+        # Last resort: Return the whole response cleaned up
+        print(f"  [DEBUG] Using full response as fallback")
+        return response.strip().strip('"\'')
+
     def generate_title_browser(self) -> str:
-        """Generate video title using Claude.ai Project"""
+        """Generate video title using Claude.ai Project with approval loop"""
         print("\n=== STEP 1: Generating Video Title (English) ===")
 
-        prompt = """Generate a compelling YouTube video title in English.
+        while True:
+            prompt = """Generate a YouTube video title in English.
 
-Requirements:
-- Follow the style and format from the reference files in this project
-- Make it attention-grabbing and clickable
-- Include numbers, urgency, or curiosity gaps if appropriate
-- Target audience: Korean seniors (60+)
-- Topics: Health, finance, lifestyle tips
+Use the "korean video titles.txt" file in this project as reference for:
+- Topics to cover (health, finance, lifestyle for seniors 60+)
+- Title structure and format
+- Tone and urgency level
+- Use of numbers and specific details
 
-Output ONLY the title, nothing else."""
+Create ONE title in English following that style.
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
+JUST OUTPUT THE TITLE. No explanations."""
 
-        # Clean up the response
-        title = response.strip()
-        # Remove any quotes or extra formatting
-        title = title.strip('"\'')
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
 
-        print(f"\nGenerated English Title: {title}")
-        return title
+            print(f"  [DEBUG] Raw response received ({len(response)} chars)")
+            print(f"  [DEBUG] First 300 chars: '{response[:300]}...'")
+            print(f"  [DEBUG] Last 300 chars: '...{response[-300:]}'")
+
+            # Parse the response to extract JUST the title (not Claude's thinking/searching)
+            title = self.extract_generated_content(response)
+
+            print(f"\n📋 Generated Title:\n{title}\n")
+            print(f"  [DEBUG] Final title after processing: '{title}'")
+
+            # Get user approval
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Title approved: {title}")
+                return title
+            elif choice == 'd':
+                print("\n🔄 Regenerating title...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                print(f"\n✏️ Modifying title...")
+
+                modify_prompt = f"""Current title: "{title}"
+
+User wants this change: {modification}
+
+Generate the modified title. JUST OUTPUT THE NEW TITLE."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                title = self.extract_generated_content(response)
+                print(f"\n📋 Modified Title:\n{title}\n")
+
+                # Ask for approval again
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Title approved: {title}")
+                    return title
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_description_browser(self, title: str) -> str:
-        """Generate video description using Claude.ai Project"""
+        """Generate video description using Claude.ai Project with approval loop"""
         print("\n=== STEP 2: Generating Video Description (English) ===")
+        print(f"  [DEBUG] Title parameter received: '{title}'")
+        print(f"  [DEBUG] Title length: {len(title)} characters")
 
-        prompt = f"""Based on this video title: "{title}"
+        while True:
+            prompt = f"""Generate a video description for this title: "{title}"
 
-Generate a compelling video description in English (2-4 sentences).
+Use the "korean video descriptions.txt" file in this project as reference for:
+- Description format and structure
+- Tone and urgency
+- How to create curiosity
+- Call to action style
 
-Requirements:
-- Follow the style from the Korean video descriptions in the reference files
-- Create urgency and curiosity
-- Promise specific value/benefits
-- End with a call to action
+Write 2-4 sentences in English following that style.
 
-Output ONLY the description, nothing else."""
+JUST OUTPUT THE DESCRIPTION."""
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
-        description = response.strip()
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            description = self.extract_generated_content(response)
 
-        print(f"\nGenerated English Description: {description[:200]}...")
-        return description
+            print(f"\n📋 Generated Description:\n{description}\n")
+
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Description approved")
+                return description
+            elif choice == 'd':
+                print("\n🔄 Regenerating description...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                modify_prompt = f"""Current description: "{description}"
+
+User wants this change: {modification}
+
+Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                description = self.extract_generated_content(response)
+                print(f"\n📋 Modified Description:\n{description}\n")
+
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Description approved")
+                    return description
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_premise_browser(self, title: str) -> str:
-        """Generate video premise using Claude.ai Project"""
+        """Generate video premise using Claude.ai Project with approval loop"""
         print("\n=== STEP 3: Generating Video Premise (English) ===")
 
-        prompt = f"""Based on this video title: "{title}"
+        while True:
+            prompt = f"""Generate a video premise based on this title: "{title}"
 
-Generate a video premise in English (2-3 sentences).
+Write 2-3 sentences in English that:
+- Introduce the expert/authority with years of experience
+- State the main discovery/solution with specific details
+- Preview the key benefits viewers will learn
 
-The premise should:
-- Explain what the video is about
-- Set up the main points/benefits
-- Create anticipation for the full script
+JUST OUTPUT THE PREMISE."""
 
-Output ONLY the premise, nothing else."""
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            premise = self.extract_generated_content(response)
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
-        premise = response.strip()
+            print(f"\n📋 Generated Premise:\n{premise}\n")
 
-        print(f"\nGenerated English Premise: {premise[:200]}...")
-        return premise
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Premise approved")
+                return premise
+            elif choice == 'd':
+                print("\n🔄 Regenerating premise...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                modify_prompt = f"""Current premise: "{premise}"
+
+User wants this change: {modification}
+
+Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                premise = self.extract_generated_content(response)
+                print(f"\n📋 Modified Premise:\n{premise}\n")
+
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Premise approved")
+                    return premise
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
         """Generate one segment of the script using Claude.ai Project"""
 
-        prompt = f"""Based on this video:
+        prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
+
 Title: "{title}"
 Premise: {premise}
 
-Generate segment {segment_num} of {total_segments} for the full video script.
+Target: {6500 // total_segments} words for this segment
 
-Requirements:
-- Follow the EXACT writing style from the reference scripts in this project
-- Target length: {6500 // total_segments} words for this segment
-- Write in a conversational, engaging Korean senior-friendly style
-- Include storytelling, examples, specific numbers and facts
-- Match the tone, structure, and hooks from the reference files
-
-This is segment {segment_num}/{total_segments}, so focus on:
+SEGMENT FOCUS:
 {self._get_segment_focus(segment_num, total_segments)}
 
-Output ONLY the script segment in English, nothing else."""
+WRITING STYLE - Match the Korean .txt script files in this project:
+- Use their dramatic storytelling style
+- Copy their structure (opening hooks, patient stories, expert credibility, solutions, timelines)
+- Match their tone for seniors (60+)
+- Include specific numbers, ages, measurements like they do
+- Use "you" language and conversational style
+- Scientific explanations in simple terms
+
+JUST WRITE THE SCRIPT SEGMENT IN ENGLISH."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=120)
         return response.strip()
@@ -311,24 +766,67 @@ Generate the ADDITIONAL content only:"""
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
-        return full_script
+        # Show preview and get approval
+        while True:
+            print("\n" + "="*60)
+            print("SCRIPT PREVIEW (first 500 characters):")
+            print(full_script[:500] + "...")
+            print("="*60)
+
+            choice = input("\nOptions: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Script approved")
+                return full_script
+            elif choice == 'd':
+                print("\n🔄 Regenerating entire script from scratch...")
+                # Recursive call to regenerate
+                return self.generate_full_script_browser(title, premise)
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change in the script? ")
+                print(f"\n✏️ Modifying script...")
+
+                modify_prompt = f"""Current script ({total_words} words):
+
+{full_script[:2000]}... [script continues]
+
+User wants this change: {modification}
+
+Generate the modified FULL script incorporating this change. Keep it 6000-7000 words.
+
+JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=180)
+                full_script = response.strip()
+                total_words = len(full_script.split())
+
+                print(f"\n✓ Modified script word count: {total_words} words")
+                print("\n" + "="*60)
+                print("MODIFIED SCRIPT PREVIEW:")
+                print(full_script[:500] + "...")
+                print("="*60)
+
+                if input("\nApprove this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Script approved")
+                    return full_script
+                else:
+                    print("\n🔄 Continuing with modifications...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
         """Translate text to Korean using Claude.ai Project"""
         print(f"\nTranslating {content_type} to Korean...")
 
-        prompt = f"""Translate this English text to Korean.
+        prompt = f"""DO NOT explain. Translate NOW.
 
-Requirements:
-- Natural, fluent Korean that sounds native
-- Appropriate for Korean seniors (60+)
-- Maintain the tone and style
-- Keep any numbers, names, or specific terms accurate
+Translate to natural Korean for seniors (60+):
 
-English text:
 {text}
 
-Output ONLY the Korean translation, nothing else."""
+JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=90)
         return response.strip()
@@ -816,9 +1314,12 @@ Output ONLY the Korean translation, nothing else."""
             print("="*60)
 
             english_title = self.generate_title_browser()
+            print(f"\n  [DEBUG MAIN] Returned title: '{english_title}'")
+            print(f"  [DEBUG MAIN] Title type: {type(english_title)}, length: {len(english_title)}")
             time.sleep(5)
 
             english_description = self.generate_description_browser(english_title)
+            print(f"\n  [DEBUG MAIN] Returned description: '{english_description[:100]}...'")
             time.sleep(5)
 
             english_premise = self.generate_premise_browser(english_title)
