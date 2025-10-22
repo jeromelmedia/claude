@@ -56,27 +56,34 @@ class VideoGenerationMacroBrowser:
             return json.load(f)
 
     def init_browser(self):
-        """Initialize Chrome browser with user profile"""
+        """Initialize Chrome browser"""
         print("\n🌐 Initializing browser...")
 
         chrome_options = Options()
 
-        # Use user's Chrome profile if specified
-        chrome_profile = self.config.get("chrome_profile_path", "")
-        if chrome_profile:
-            # Extract profile directory and profile name
-            profile_dir = str(Path(chrome_profile).parent)
-            profile_name = Path(chrome_profile).name
-            chrome_options.add_argument(f"user-data-dir={profile_dir}")
-            if profile_name != "Default":
-                chrome_options.add_argument(f"profile-directory={profile_name}")
+        # Important: Don't use existing profile to avoid crashes
+        # User will need to log in to Claude.ai manually on first run
 
-        # Other options
+        # Add compatibility options
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--start-maximized")
-        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging'])
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
 
-        self.driver = webdriver.Chrome(options=chrome_options)
-        print("✓ Browser initialized")
+        try:
+            self.driver = webdriver.Chrome(options=chrome_options)
+            print("✓ Browser initialized")
+        except Exception as e:
+            print(f"\n✗ Failed to initialize Chrome: {e}")
+            print("\nTroubleshooting:")
+            print("1. Make sure Chrome is installed")
+            print("2. Close all Chrome windows and try again")
+            print("3. Update Chrome to latest version")
+            print("4. Try: pip install --upgrade selenium")
+            raise
 
     def navigate_to_project(self):
         """Navigate to Claude.ai Project"""
