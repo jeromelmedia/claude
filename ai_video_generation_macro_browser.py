@@ -38,6 +38,7 @@ class VideoGenerationMacroBrowser:
         # Character selection
         self.selected_character_folder = None
         self.selected_character_video = None
+        self.character_name = None
 
         # Browser
         self.driver = None
@@ -140,8 +141,17 @@ class VideoGenerationMacroBrowser:
             print("Press Enter once you're logged in and see the chat interface")
             input()
 
-    def send_prompt_and_wait(self, prompt: str, wait_time: int = 60) -> str:
-        """Send a prompt to Claude and wait for response"""
+    def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
+                             stabilization_wait: int = 20, max_stability_checks: int = 15) -> str:
+        """
+        Send a prompt to Claude and wait for response
+
+        Args:
+            prompt: The prompt to send
+            wait_time: Max time to wait for generation to complete
+            stabilization_wait: Seconds to wait after Stop button disappears (default 20)
+            max_stability_checks: Max number of stability checks (default 15)
+        """
         try:
             # Retry logic for DOM issues
             max_retries = 3
@@ -268,15 +278,15 @@ class VideoGenerationMacroBrowser:
 
             # CRITICAL: Wait for response to fully stabilize
             # Claude may still be typing even after Stop button disappears
-            print(f"  ⏱️  Waiting for response to stabilize (20 seconds)...")
-            time.sleep(20)  # Increased from 15 to 20 for longer content
+            print(f"  ⏱️  Waiting for response to stabilize ({stabilization_wait} seconds)...")
+            time.sleep(stabilization_wait)
 
             # Check if text is still changing (wait until stable)
-            print(f"  🔍 Verifying response stability...")
+            print(f"  🔍 Verifying response stability (up to {max_stability_checks} checks)...")
             stable_count = 0
             last_text_length = 0
 
-            for stability_check in range(15):  # Increased from 5 to 15 checks (up to 45 seconds)
+            for stability_check in range(max_stability_checks):
                 try:
                     # Get current text length
                     current_js = "return document.body.innerText.length;"
@@ -364,7 +374,15 @@ class VideoGenerationMacroBrowser:
                         response_text = result['text'].strip()
                         method = result.get('method', 'unknown')
                         print(f"  [DEBUG] Extracted via JS (selector: {method})")
-                        print(f"  [DEBUG] Response preview: {response_text[:150]}...")
+
+                        # Show FIRST and LAST parts for verification
+                        if len(response_text) > 300:
+                            first_part = response_text[:150]
+                            last_part = response_text[-150:]
+                            print(f"  [DEBUG] Response START: {first_part}...")
+                            print(f"  [DEBUG] Response END: ...{last_part}")
+                        else:
+                            print(f"  [DEBUG] Response preview: {response_text[:150]}...")
                         break
 
                 except Exception as e:
@@ -754,7 +772,13 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
         print(f"  Generating segment {segment_num}/{total_segments}...")
-        response = self.send_prompt_and_wait(prompt, wait_time=180)  # 3 minutes for long segments
+        # EXTRA LONG waits for script segments (they're 1625+ words)
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=240,  # 4 minutes max wait
+            stabilization_wait=30,  # 30 seconds initial stabilization (up from 20)
+            max_stability_checks=20  # 20 checks = up to 60 more seconds (up from 15)
+        )
         segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
 
         word_count = len(segment_text.split())
@@ -921,8 +945,8 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
     # === CHARACTER SELECTION ===
 
-    def select_character(self) -> Tuple[str, str]:
-        """Let user select which character to use"""
+    def select_character(self) -> Tuple[str, str, Optional[str]]:
+        """Let user select which character to use - returns (folder, video_file, character_name)"""
         characters_base = Path(self.config.get("characters_base_path", "./characters"))
 
         if not characters_base.exists():
@@ -973,10 +997,26 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         video_file = video_files[0]
 
-        print(f"\n✓ Selected: {selected_folder.name}")
-        print(f"✓ Using video: {video_file.name}")
+        # Read character name from character_name.txt
+        character_name_file = selected_folder / "character_name.txt"
+        character_name = None
+        if character_name_file.exists():
+            try:
+                with open(character_name_file, 'r', encoding='utf-8') as f:
+                    character_name = f.read().strip()
+                print(f"\n✓ Selected: {selected_folder.name}")
+                print(f"✓ Character name: {character_name}")
+                print(f"✓ Using video: {video_file.name}")
+            except Exception as e:
+                print(f"Warning: Could not read character_name.txt: {e}")
+                print(f"\n✓ Selected: {selected_folder.name}")
+                print(f"✓ Using video: {video_file.name}")
+        else:
+            print(f"\n✓ Selected: {selected_folder.name}")
+            print(f"✓ Using video: {video_file.name}")
+            print(f"  (No character_name.txt found - add one to display character name)")
 
-        return str(selected_folder), str(video_file)
+        return str(selected_folder), str(video_file), character_name
 
     def get_character_images(self, num_images: int = 4) -> List[str]:
         """Get random images from selected character folder"""
@@ -1364,7 +1404,7 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             print("="*60)
 
             # === CHARACTER SELECTION ===
-            self.selected_character_folder, self.selected_character_video = self.select_character()
+            self.selected_character_folder, self.selected_character_video, self.character_name = self.select_character()
 
             # === INITIALIZE BROWSER ===
             self.init_browser()
