@@ -537,7 +537,7 @@ class VideoGenerationMacroBrowser:
             # Use character name if available, otherwise fall back to "a doctor"
             host_identity = f"The host is {self.character_name}" if self.character_name else "The host is a doctor"
 
-            prompt = f"""Generate a YouTube video title in English.
+            prompt = f"""Generate a YouTube video title in PURE ENGLISH.
 
 Use the "korean video titles.txt" file in this project as reference for:
 - Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
@@ -547,7 +547,11 @@ Use the "korean video titles.txt" file in this project as reference for:
 
 {host_identity}, so focus on health and lifestyle topics only.
 
-Create ONE title in English following that style.
+LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH - NO Korean words or phrases
+- Use ONLY English vocabulary
+
+Create ONE title in pure English following that style.
 
 JUST OUTPUT THE TITLE. No explanations."""
 
@@ -615,9 +619,15 @@ REQUIREMENTS:
 - Use emotional hooks
 - End with strong call to action
 
-Write in English following that style.
+LANGUAGE REQUIREMENTS - CRITICAL:
+- Write ENTIRELY in ENGLISH language only
+- NO Korean words, phrases, or greetings
+- Use ONLY English vocabulary throughout
+- NO fabricated quotes or testimonials
 
-JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
+Write in pure English following that style.
+
+JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
             description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
@@ -664,12 +674,17 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
             prompt = f"""Generate a video premise based on this title: "{title}"
 
-Write 2-3 sentences in English that:
+Write 2-3 sentences in PURE ENGLISH that:
 - {expert_intro} with years of experience
 - State the main discovery/solution with specific details
 - Preview the key benefits viewers will learn
 
-JUST OUTPUT THE PREMISE."""
+LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH - NO Korean words or phrases
+- NO fabricated quotes or testimonials
+- Describe the premise directly without quotation marks
+
+JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
             premise = self.extract_generated_content(response)
@@ -723,7 +738,7 @@ Target: {6500 // total_segments} words for this segment
 SEGMENT FOCUS:
 {self._get_segment_focus(segment_num, total_segments)}
 
-WRITING STYLE - Match the Korean .txt script files in this project:
+WRITING STYLE - Reference the Korean .txt script files in this project:
 - Use their dramatic storytelling style
 - Copy their structure (opening hooks, patient stories, expert credibility, solutions, timelines)
 - Match their tone for seniors (60+)
@@ -740,7 +755,20 @@ CRITICAL - KOREAN CONTEXT ONLY:
 - NO American names, cities, or locations
 - The doctor practices in Korea and treats Korean patients
 
-JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
+LANGUAGE REQUIREMENTS - CRITICAL:
+- Write ENTIRELY in ENGLISH language only
+- DO NOT include ANY Korean words, phrases, or greetings
+- DO NOT mix Korean and English (no "여러분", "안녕하세요", etc.)
+- Use ONLY English vocabulary throughout the entire script
+- Korean context (names, places) is fine, but ALL text must be in English
+
+NO FABRICATED CONTENT:
+- DO NOT invent fake quotes or testimonials
+- DO NOT create fabricated patient dialogue
+- Patient STORIES are okay, but NO direct quotes
+- Describe what happened without using quotation marks
+
+JUST WRITE THE SCRIPT SEGMENT IN PURE ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
         # EXTRA LONG waits for script segments (they're 1625+ words)
         response = self.send_prompt_and_wait(

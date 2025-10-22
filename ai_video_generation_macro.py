@@ -346,6 +346,15 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         prompt += f"\n\nWrite approximately {target_words_per_segment} words in your trained writing style."
 
+        # Add language requirements
+        prompt += """\n
+CRITICAL LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH language only
+- DO NOT include ANY Korean words, phrases, or greetings
+- DO NOT mix languages (no "여러분", "안녕하세요", etc.)
+- Use ONLY English vocabulary throughout
+- NO fabricated quotes or testimonials - describe patient stories without quotation marks"""
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
