@@ -38,6 +38,7 @@ class VideoGenerationMacroBrowser:
         # Character selection
         self.selected_character_folder = None
         self.selected_character_video = None
+        self.character_name = None
 
         # Browser
         self.driver = None
@@ -140,8 +141,17 @@ class VideoGenerationMacroBrowser:
             print("Press Enter once you're logged in and see the chat interface")
             input()
 
-    def send_prompt_and_wait(self, prompt: str, wait_time: int = 60) -> str:
-        """Send a prompt to Claude and wait for response"""
+    def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
+                             stabilization_wait: int = 20, max_stability_checks: int = 15) -> str:
+        """
+        Send a prompt to Claude and wait for response
+
+        Args:
+            prompt: The prompt to send
+            wait_time: Max time to wait for generation to complete
+            stabilization_wait: Seconds to wait after Stop button disappears (default 20)
+            max_stability_checks: Max number of stability checks (default 15)
+        """
         try:
             # Retry logic for DOM issues
             max_retries = 3
@@ -248,8 +258,8 @@ class VideoGenerationMacroBrowser:
                         generation_detected = True
 
                     if not stop_button and generation_detected:
-                        # Response complete
-                        print(f"  ✓ Generation complete!")
+                        # Stop button disappeared - but wait to make sure it's REALLY done
+                        print(f"  ✓ Stop button disappeared, waiting to ensure completion...")
                         break
                     elif not stop_button and not generation_detected:
                         # Check if response already appeared (fast response)
@@ -266,7 +276,38 @@ class VideoGenerationMacroBrowser:
 
                 time.sleep(2)
 
-            # Extra wait for DOM to fully settle after generation
+            # CRITICAL: Wait for response to fully stabilize
+            # Claude may still be typing even after Stop button disappears
+            print(f"  ⏱️  Waiting for response to stabilize ({stabilization_wait} seconds)...")
+            time.sleep(stabilization_wait)
+
+            # Check if text is still changing (wait until stable)
+            print(f"  🔍 Verifying response stability (up to {max_stability_checks} checks)...")
+            stable_count = 0
+            last_text_length = 0
+
+            for stability_check in range(max_stability_checks):
+                try:
+                    # Get current text length
+                    current_js = "return document.body.innerText.length;"
+                    current_length = self.driver.execute_script(current_js)
+
+                    if current_length == last_text_length:
+                        stable_count += 1
+                        print(f"    Stable check {stable_count}/3 (length: {current_length})")
+                        if stable_count >= 3:
+                            print(f"  ✓ Response confirmed stable!")
+                            break
+                    else:
+                        print(f"    Text still changing ({last_text_length} → {current_length})")
+                        stable_count = 0
+
+                    last_text_length = current_length
+                    time.sleep(3)  # Increased from 2 to 3 seconds between checks
+                except:
+                    time.sleep(3)
+
+            # Final wait for DOM to settle
             print(f"  Extracting response text...")
             time.sleep(3)
 
@@ -333,7 +374,15 @@ class VideoGenerationMacroBrowser:
                         response_text = result['text'].strip()
                         method = result.get('method', 'unknown')
                         print(f"  [DEBUG] Extracted via JS (selector: {method})")
-                        print(f"  [DEBUG] Response preview: {response_text[:150]}...")
+
+                        # Show FIRST and LAST parts for verification
+                        if len(response_text) > 300:
+                            first_part = response_text[:150]
+                            last_part = response_text[-150:]
+                            print(f"  [DEBUG] Response START: {first_part}...")
+                            print(f"  [DEBUG] Response END: ...{last_part}")
+                        else:
+                            print(f"  [DEBUG] Response preview: {response_text[:150]}...")
                         break
 
                 except Exception as e:
@@ -440,10 +489,15 @@ class VideoGenerationMacroBrowser:
             traceback.print_exc()
             return ""
 
-    def extract_generated_content(self, response: str) -> str:
+    def extract_generated_content(self, response: str, extract_all: bool = False) -> str:
         """
         Extract the actual generated content from Claude's response,
         filtering out thinking, searching, and explanatory text.
+
+        Args:
+            response: The raw response from Claude
+            extract_all: If True, return ALL content lines (for scripts).
+                        If False, return only the last line (for titles/descriptions).
         """
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
@@ -461,7 +515,10 @@ class VideoGenerationMacroBrowser:
             'I can see',
             'Looking at',
             'relevant sections',
-            'results'
+            'results',
+            'Show working file',
+            'TEXT',
+            'relevant sections'
         ]
 
         # Collect candidate lines (not process text)
@@ -483,12 +540,18 @@ class VideoGenerationMacroBrowser:
             if not is_process and len(line_stripped) > 15:
                 candidates.append(line_stripped)
 
-        # The actual content is usually the LAST substantial line
+        # Return based on extract_all parameter
         if candidates:
-            # Return the last candidate line
-            result = candidates[-1].strip('"\'')
-            print(f"  [DEBUG] Extracted from {len(candidates)} candidate lines")
-            return result
+            if extract_all:
+                # For scripts: return ALL candidate lines joined together
+                result = '\n\n'.join(candidates)
+                print(f"  [DEBUG] Extracted ALL {len(candidates)} content lines (script mode)")
+                return result
+            else:
+                # For titles/descriptions: return only the LAST line
+                result = candidates[-1].strip('"\'')
+                print(f"  [DEBUG] Extracted LAST line from {len(candidates)} candidate lines")
+                return result
 
         # Fallback: Look for content after common intro phrases
         for intro in ['title:', 'here\'s an', 'here is', ':']:
@@ -515,10 +578,12 @@ class VideoGenerationMacroBrowser:
             prompt = """Generate a YouTube video title in English.
 
 Use the "korean video titles.txt" file in this project as reference for:
-- Topics to cover (health, finance, lifestyle for seniors 60+)
+- Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
 - Title structure and format
 - Tone and urgency level
 - Use of numbers and specific details
+
+The host is a DOCTOR, so focus on health and lifestyle topics only.
 
 Create ONE title in English following that style.
 
@@ -577,7 +642,7 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
         print(f"  [DEBUG] Title length: {len(title)} characters")
 
         while True:
-            prompt = f"""Generate a video description for this title: "{title}"
+            prompt = f"""Generate a DETAILED, COMPREHENSIVE video description for this title: "{title}"
 
 Use the "korean video descriptions.txt" file in this project as reference for:
 - Description format and structure
@@ -585,11 +650,21 @@ Use the "korean video descriptions.txt" file in this project as reference for:
 - How to create curiosity
 - Call to action style
 
-Write 2-4 sentences in English following that style.
+REQUIREMENTS:
+- Write a LONG, DETAILED description (aim for 500-1000+ words)
+- Maximum 5000 characters
+- Include multiple paragraphs
+- Explain what viewers will learn
+- Build curiosity and urgency
+- Include specific benefits and takeaways
+- Use emotional hooks
+- End with strong call to action
 
-JUST OUTPUT THE DESCRIPTION."""
+Write in English following that style.
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
+
+            response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
             description = self.extract_generated_content(response)
 
             print(f"\n📋 Generated Description:\n{description}\n")
@@ -694,10 +769,30 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 - Use "you" language and conversational style
 - Scientific explanations in simple terms
 
-JUST WRITE THE SCRIPT SEGMENT IN ENGLISH."""
+CRITICAL - KOREAN CONTEXT ONLY:
+- The doctor is from KOREA (not America)
+- ALL patient stories must be Korean patients with Korean names (Kim, Park, Lee, Choi, etc.)
+- ALL locations must be in Korea (Seoul, Busan, hospitals in Korea, etc.)
+- Use Korean cultural context and references
+- Mention Korean healthcare system when relevant
+- NO American names, cities, or locations
+- The doctor practices in Korea and treats Korean patients
 
-        response = self.send_prompt_and_wait(prompt, wait_time=120)
-        return response.strip()
+JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
+
+        print(f"  Generating segment {segment_num}/{total_segments}...")
+        # EXTRA LONG waits for script segments (they're 1625+ words)
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=240,  # 4 minutes max wait
+            stabilization_wait=30,  # 30 seconds initial stabilization (up from 20)
+            max_stability_checks=20  # 20 checks = up to 60 more seconds (up from 15)
+        )
+        segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
+
+        word_count = len(segment_text.split())
+        print(f"  ✓ Segment {segment_num} generated ({len(segment_text)} characters, ~{word_count} words)")
+        return segment_text
 
     def _get_segment_focus(self, segment_num: int, total_segments: int) -> str:
         """Get focus instructions for each segment"""
@@ -831,36 +926,106 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
         response = self.send_prompt_and_wait(prompt, wait_time=90)
         return response.strip()
 
-    def translate_script_to_korean_browser(self, english_script: str) -> str:
-        """Translate full script to Korean in chunks"""
+    def translate_script_to_korean_browser(self, script_file_path: str) -> str:
+        """Translate full script to Korean using uploaded file"""
         print("\n=== Translating Full Script to Korean ===")
-        print("This may take a few minutes...")
+        print("Using uploaded script file for translation...")
 
-        # Split into chunks of ~1500 words
-        words = english_script.split()
-        chunk_size = 1500
-        chunks = [" ".join(words[i:i+chunk_size]) for i in range(0, len(words), chunk_size)]
+        prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
 
-        korean_chunks = []
+IMPORTANT REQUIREMENTS:
+- Translate the COMPLETE script from beginning to end
+- Maintain the storytelling style and dramatic tone
+- Keep all numbers, ages, and specific details accurate
+- Preserve the paragraph structure and formatting
+- Use natural, conversational Korean for seniors (60+)
+- Keep the same emotional impact and urgency
 
-        for i, chunk in enumerate(chunks, 1):
-            print(f"Translating chunk {i}/{len(chunks)}...")
-            korean_chunk = self.translate_to_korean_browser(chunk, f"chunk {i}")
-            korean_chunks.append(korean_chunk)
+JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
-            if i < len(chunks):
-                print("⏱ Waiting 10 seconds...")
-                time.sleep(10)
+        print("Sending translation request to Claude...")
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=300,  # 5 minutes for full script translation
+            stabilization_wait=40,  # Extra long wait for large translation
+            max_stability_checks=25  # More checks for translation
+        )
 
-        korean_script = "\n\n".join(korean_chunks)
-        print("✓ Script translated to Korean")
+        korean_script = self.extract_generated_content(response, extract_all=True)
+
+        print(f"✓ Script translated to Korean ({len(korean_script)} characters)")
 
         return korean_script
 
+    def upload_file_to_project(self, file_path: str) -> bool:
+        """Upload a file to the Claude.ai Project"""
+        try:
+            print(f"\n📤 Uploading {Path(file_path).name} to Claude Project...")
+
+            # Look for the file upload button/icon
+            # Try multiple methods to find and click upload
+            upload_selectors = [
+                "button[aria-label*='upload' i]",
+                "button[aria-label*='attach' i]",
+                "input[type='file']",
+                "button:has(svg[class*='paperclip'])",
+                "button:has(svg[class*='upload'])"
+            ]
+
+            upload_element = None
+            for selector in upload_selectors:
+                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                if elements:
+                    upload_element = elements[0]
+                    print(f"  Found upload element with selector: {selector}")
+                    break
+
+            if not upload_element:
+                print("  ⚠ Could not find upload button, trying file input directly...")
+                # Try to find hidden file input and use JavaScript
+                file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                if file_inputs:
+                    # Make it visible and interactable
+                    self.driver.execute_script("""
+                        arguments[0].style.display = 'block';
+                        arguments[0].style.visibility = 'visible';
+                        arguments[0].style.opacity = '1';
+                    """, file_inputs[0])
+                    upload_element = file_inputs[0]
+
+            if upload_element:
+                # If it's a file input, send the file path directly
+                if upload_element.tag_name == 'input':
+                    abs_path = str(Path(file_path).absolute())
+                    upload_element.send_keys(abs_path)
+                    print(f"  ✓ File uploaded: {Path(file_path).name}")
+                else:
+                    # If it's a button, click it first then find the file input
+                    upload_element.click()
+                    time.sleep(1)
+                    file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                    if file_inputs:
+                        abs_path = str(Path(file_path).absolute())
+                        file_inputs[0].send_keys(abs_path)
+                        print(f"  ✓ File uploaded: {Path(file_path).name}")
+
+                # Wait for upload to complete
+                time.sleep(5)
+                return True
+            else:
+                print("  ✗ Could not find upload mechanism")
+                return False
+
+        except Exception as e:
+            print(f"  ✗ Error uploading file: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
     # === CHARACTER SELECTION ===
 
-    def select_character(self) -> Tuple[str, str]:
-        """Let user select which character to use"""
+    def select_character(self) -> Tuple[str, str, Optional[str]]:
+        """Let user select which character to use - returns (folder, video_file, character_name)"""
         characters_base = Path(self.config.get("characters_base_path", "./characters"))
 
         if not characters_base.exists():
@@ -911,10 +1076,26 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         video_file = video_files[0]
 
-        print(f"\n✓ Selected: {selected_folder.name}")
-        print(f"✓ Using video: {video_file.name}")
+        # Read character name from character_name.txt
+        character_name_file = selected_folder / "character_name.txt"
+        character_name = None
+        if character_name_file.exists():
+            try:
+                with open(character_name_file, 'r', encoding='utf-8') as f:
+                    character_name = f.read().strip()
+                print(f"\n✓ Selected: {selected_folder.name}")
+                print(f"✓ Character name: {character_name}")
+                print(f"✓ Using video: {video_file.name}")
+            except Exception as e:
+                print(f"Warning: Could not read character_name.txt: {e}")
+                print(f"\n✓ Selected: {selected_folder.name}")
+                print(f"✓ Using video: {video_file.name}")
+        else:
+            print(f"\n✓ Selected: {selected_folder.name}")
+            print(f"✓ Using video: {video_file.name}")
+            print(f"  (No character_name.txt found - add one to display character name)")
 
-        return str(selected_folder), str(video_file)
+        return str(selected_folder), str(video_file), character_name
 
     def get_character_images(self, num_images: int = 4) -> List[str]:
         """Get random images from selected character folder"""
@@ -1302,7 +1483,7 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             print("="*60)
 
             # === CHARACTER SELECTION ===
-            self.selected_character_folder, self.selected_character_video = self.select_character()
+            self.selected_character_folder, self.selected_character_video, self.character_name = self.select_character()
 
             # === INITIALIZE BROWSER ===
             self.init_browser()
@@ -1344,6 +1525,18 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
                 f.write(f"Script:\n{english_script}")
             print(f"✓ English script saved to: {script_path}")
 
+            # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
+            print("\n" + "="*60)
+            print("📤 UPLOADING SCRIPT TO CLAUDE PROJECT")
+            print("="*60)
+
+            upload_success = self.upload_file_to_project(str(script_path))
+            if upload_success:
+                print("✓ Script uploaded successfully - ready for translation")
+                time.sleep(3)  # Wait for upload to fully process
+            else:
+                print("⚠ Upload failed - will attempt translation without file reference")
+
             # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
             print("\n" + "="*60)
             print("🌐 PHASE 2: TRANSLATE ALL CONTENT TO KOREAN (Browser)")
@@ -1355,19 +1548,31 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             korean_description = self.translate_to_korean_browser(english_description, "description")
             time.sleep(5)
 
-            korean_premise = self.translate_to_korean_browser(english_premise, "premise")
-            time.sleep(5)
+            # NOTE: Premise is NOT translated - kept in English for internal use
+            print("ℹ️  Premise is kept in English (not translated)")
 
-            korean_script = self.translate_script_to_korean_browser(english_script)
+            # Translate full script using uploaded file (not chunks)
+            korean_script = self.translate_script_to_korean_browser(str(script_path))
 
-            # Save Korean content
+            # Save Korean title as separate file
+            korean_title_path = self.working_dir / "video_title_korean.txt"
+            with open(korean_title_path, 'w', encoding='utf-8') as f:
+                f.write(korean_title)
+            print(f"✓ Korean title saved to: {korean_title_path}")
+
+            # Save Korean description as separate file
+            korean_description_path = self.working_dir / "video_description_korean.txt"
+            with open(korean_description_path, 'w', encoding='utf-8') as f:
+                f.write(korean_description)
+            print(f"✓ Korean description saved to: {korean_description_path}")
+
+            # Save Korean content (title, description, and script combined)
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
                 f.write(f"Title: {korean_title}\n\n")
                 f.write(f"Description: {korean_description}\n\n")
-                f.write(f"Premise: {korean_premise}\n\n")
                 f.write(f"Script:\n{korean_script}")
-            print(f"✓ Korean script saved to: {korean_script_path}")
+            print(f"✓ Korean script (combined) saved to: {korean_script_path}")
 
             # === CLOSE BROWSER ===
             print("\n🌐 Closing browser...")
