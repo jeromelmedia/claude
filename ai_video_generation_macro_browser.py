@@ -888,8 +888,12 @@ Generate the ADDITIONAL content only:"""
         # Show preview and get approval
         while True:
             print("\n" + "="*60)
-            print("SCRIPT PREVIEW (first 500 characters):")
-            print(full_script[:500] + "...")
+            print("SCRIPT PREVIEW:")
+            print("START:")
+            print(full_script[:300] + "...")
+            print("\n...\n")
+            print("END:")
+            print("..." + full_script[-300:])
             print("="*60)
 
             choice = input("\nOptions: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
