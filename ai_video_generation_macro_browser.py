@@ -1297,9 +1297,11 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             # Step 4: Add subtitles
             print("[4/6] Burning subtitles...")
 
-            # Windows path fix for subtitles
+            # Windows path fix for subtitles - properly escape for FFmpeg filter syntax
             subtitle_path_fixed = str(Path(subtitle_path).absolute()).replace('\\', '/')
             subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\\\:')
+            # Escape spaces for FFmpeg filter syntax on Windows
+            subtitle_path_fixed = subtitle_path_fixed.replace(' ', '\\\\ ')
 
             subtitle_cmd = [
                 'ffmpeg', '-y',
