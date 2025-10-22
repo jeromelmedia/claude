@@ -665,7 +665,7 @@ Write in English following that style.
 JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
-            description = self.extract_generated_content(response)
+            description = self.extract_generated_content(response, extract_all=True)  # Get full description, not just last line
 
             print(f"\n📋 Generated Description:\n{description}\n")
 
@@ -686,7 +686,7 @@ User wants this change: {modification}
 Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                description = self.extract_generated_content(response)
+                description = self.extract_generated_content(response, extract_all=True)  # Get full description, not just last line
                 print(f"\n📋 Modified Description:\n{description}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
