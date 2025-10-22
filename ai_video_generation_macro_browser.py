@@ -1554,14 +1554,25 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             # Translate full script using uploaded file (not chunks)
             korean_script = self.translate_script_to_korean_browser(str(script_path))
 
-            # Save Korean content (title, description, and script only - NO premise)
+            # Save Korean title as separate file
+            korean_title_path = self.working_dir / "video_title_korean.txt"
+            with open(korean_title_path, 'w', encoding='utf-8') as f:
+                f.write(korean_title)
+            print(f"✓ Korean title saved to: {korean_title_path}")
+
+            # Save Korean description as separate file
+            korean_description_path = self.working_dir / "video_description_korean.txt"
+            with open(korean_description_path, 'w', encoding='utf-8') as f:
+                f.write(korean_description)
+            print(f"✓ Korean description saved to: {korean_description_path}")
+
+            # Save Korean content (title, description, and script combined)
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
                 f.write(f"Title: {korean_title}\n\n")
                 f.write(f"Description: {korean_description}\n\n")
                 f.write(f"Script:\n{korean_script}")
-            print(f"✓ Korean script saved to: {korean_script_path}")
-            print("   (Contains: Title, Description, and Script in Korean)")
+            print(f"✓ Korean script (combined) saved to: {korean_script_path}")
 
             # === CLOSE BROWSER ===
             print("\n🌐 Closing browser...")
