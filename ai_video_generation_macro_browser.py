@@ -56,13 +56,21 @@ class VideoGenerationMacroBrowser:
             return json.load(f)
 
     def init_browser(self):
-        """Initialize Chrome browser"""
+        """Initialize Chrome browser with persistent profile for automation"""
         print("\n🌐 Initializing browser...")
 
         chrome_options = Options()
 
-        # Important: Don't use existing profile to avoid crashes
-        # User will need to log in to Claude.ai manually on first run
+        # Create a dedicated Chrome profile directory for this automation
+        # This keeps you logged in between runs WITHOUT conflicting with your main Chrome
+        automation_profile_dir = Path("./chrome_automation_profile").absolute()
+        automation_profile_dir.mkdir(exist_ok=True)
+
+        print(f"Using automation profile: {automation_profile_dir}")
+        print("(This keeps you logged in between runs)")
+
+        # Use the dedicated profile directory
+        chrome_options.add_argument(f"user-data-dir={automation_profile_dir}")
 
         # Add compatibility options
         chrome_options.add_argument("--no-sandbox")
@@ -80,7 +88,7 @@ class VideoGenerationMacroBrowser:
             print(f"\n✗ Failed to initialize Chrome: {e}")
             print("\nTroubleshooting:")
             print("1. Make sure Chrome is installed")
-            print("2. Close all Chrome windows and try again")
+            print("2. Close the automation browser if it's already open")
             print("3. Update Chrome to latest version")
             print("4. Try: pip install --upgrade selenium")
             raise

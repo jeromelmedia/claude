@@ -43,6 +43,7 @@ Thumbs.db
 
 # Chrome
 *.crx
+chrome_automation_profile/
 
 # Video clips
 talking_person.mp4
