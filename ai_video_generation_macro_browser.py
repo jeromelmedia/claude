@@ -1439,7 +1439,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             subtitle_cmd = [
                 'ffmpeg', '-y',
                 '-i', str(temp_concatenated),
-                '-vf', f"subtitles={subtitle_path_fixed}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'",
+                '-vf', f"subtitles={subtitle_path_fixed}:force_style='FontName=Arial,FontSize=40,Bold=1,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HC0000000,Outline=3,Shadow=2,MarginV=50'",
                 '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                 '-c:a', 'copy',
                 str(temp_with_subs)
