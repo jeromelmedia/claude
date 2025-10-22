@@ -534,7 +534,10 @@ class VideoGenerationMacroBrowser:
         print("\n=== STEP 1: Generating Video Title ===")
 
         while True:
-            prompt = """Generate a YouTube video title in English.
+            # Use character name if available, otherwise fall back to "a doctor"
+            host_identity = f"The host is {self.character_name}" if self.character_name else "The host is a doctor"
+
+            prompt = f"""Generate a YouTube video title in English.
 
 Use the "korean video titles.txt" file in this project as reference for:
 - Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
@@ -542,7 +545,7 @@ Use the "korean video titles.txt" file in this project as reference for:
 - Tone and urgency level
 - Use of numbers and specific details
 
-The host is a DOCTOR, so focus on health and lifestyle topics only.
+{host_identity}, so focus on health and lifestyle topics only.
 
 Create ONE title in English following that style.
 
@@ -617,7 +620,7 @@ Write in English following that style.
 JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
-            description = self.extract_generated_content(response)
+            description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
 
             print(f"\nGenerated Description:\n{description}\n")
 
@@ -638,7 +641,7 @@ User wants this change: {modification}
 Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                description = self.extract_generated_content(response)
+                description = self.extract_generated_content(response, extract_all=True)  # Get full description
                 print(f"\nModified Description:\n{description}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
@@ -656,10 +659,13 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
         print("\n=== STEP 3: Generating Video Premise ===")
 
         while True:
+            # Use character name if available
+            expert_intro = f"Introduce {self.character_name}" if self.character_name else "Introduce the expert/authority"
+
             prompt = f"""Generate a video premise based on this title: "{title}"
 
 Write 2-3 sentences in English that:
-- Introduce the expert/authority with years of experience
+- {expert_intro} with years of experience
 - State the main discovery/solution with specific details
 - Preview the key benefits viewers will learn
 
@@ -704,6 +710,9 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
         """Generate one segment of the script using Claude.ai Project"""
         print(f"  Generating segment {segment_num}/{total_segments}...")
 
+        # Use character name if available
+        doctor_identity = f"The doctor is {self.character_name}, from KOREA" if self.character_name else "The doctor is from KOREA"
+
         prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
 
 Title: "{title}"
@@ -723,7 +732,7 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 - Scientific explanations in simple terms
 
 CRITICAL - KOREAN CONTEXT ONLY:
-- The doctor is from KOREA (not America)
+- {doctor_identity} (not America)
 - ALL patient stories must be Korean patients with Korean names (Kim, Park, Lee, Choi, etc.)
 - ALL locations must be in Korea (Seoul, Busan, hospitals in Korea, etc.)
 - Use Korean cultural context and references
