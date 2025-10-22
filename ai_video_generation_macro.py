@@ -258,7 +258,7 @@ class VideoGenerationMacro:
                     system=self.custom_instructions,
                     messages=[{
                         "role": "user",
-                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate."
+                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate. Maximum 4000 characters."
                     }]
                 )
                 break
@@ -271,6 +271,12 @@ class VideoGenerationMacro:
                     raise
 
         english_description = message.content[0].text.strip()
+
+        # Enforce hard 4000 character limit
+        if len(english_description) > 4000:
+            english_description = english_description[:4000]
+            print(f"⚠ Description truncated to 4000 characters")
+
         print(f"\nGenerated English Description:\n{english_description}")
         print(f"✓ Auto-approved (running in full automation mode)")
 

@@ -650,7 +650,7 @@ Use the "korean video descriptions.txt" file in this project as reference for:
 
 REQUIREMENTS:
 - Write a LONG, DETAILED description (aim for 500-1000+ words)
-- Maximum 5000 characters
+- Maximum 4000 characters
 - Include multiple paragraphs
 - Explain what viewers will learn
 - Build curiosity and urgency
@@ -682,6 +682,10 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE.
 
             if choice == 'a':
                 print("\nDescription approved\n")
+                # Enforce hard 4000 character limit
+                if len(description) > 4000:
+                    description = description[:4000]
+                    print(f"⚠ Description truncated to 4000 characters")
                 return description
             elif choice == 'd':
                 print("\nRegenerating...")
@@ -705,6 +709,10 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
                     print("\nDescription approved\n")
+                    # Enforce hard 4000 character limit
+                    if len(description) > 4000:
+                        description = description[:4000]
+                        print(f"⚠ Description truncated to 4000 characters")
                     return description
                 else:
                     print("\nStarting over...")
