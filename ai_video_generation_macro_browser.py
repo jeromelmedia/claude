@@ -248,8 +248,8 @@ class VideoGenerationMacroBrowser:
                         generation_detected = True
 
                     if not stop_button and generation_detected:
-                        # Response complete
-                        print(f"  ✓ Generation complete!")
+                        # Stop button disappeared - but wait to make sure it's REALLY done
+                        print(f"  ✓ Stop button disappeared, waiting to ensure completion...")
                         break
                     elif not stop_button and not generation_detected:
                         # Check if response already appeared (fast response)
@@ -266,7 +266,38 @@ class VideoGenerationMacroBrowser:
 
                 time.sleep(2)
 
-            # Extra wait for DOM to fully settle after generation
+            # CRITICAL: Wait for response to fully stabilize
+            # Claude may still be typing even after Stop button disappears
+            print(f"  ⏱️  Waiting for response to stabilize (15 seconds)...")
+            time.sleep(15)
+
+            # Check if text is still changing (wait until stable)
+            print(f"  🔍 Verifying response stability...")
+            stable_count = 0
+            last_text_length = 0
+
+            for stability_check in range(5):  # Check 5 times
+                try:
+                    # Get current text length
+                    current_js = "return document.body.innerText.length;"
+                    current_length = self.driver.execute_script(current_js)
+
+                    if current_length == last_text_length:
+                        stable_count += 1
+                        print(f"    Stable check {stable_count}/3 (length: {current_length})")
+                        if stable_count >= 3:
+                            print(f"  ✓ Response confirmed stable!")
+                            break
+                    else:
+                        print(f"    Text still changing ({last_text_length} → {current_length})")
+                        stable_count = 0
+
+                    last_text_length = current_length
+                    time.sleep(2)
+                except:
+                    time.sleep(2)
+
+            # Final wait for DOM to settle
             print(f"  Extracting response text...")
             time.sleep(3)
 
