@@ -177,22 +177,53 @@ class VideoGenerationMacroBrowser:
                 time.sleep(2)
 
             # Extract the last response
-            time.sleep(2)  # Wait for DOM to settle
+            time.sleep(3)  # Wait for DOM to settle
 
-            # Get all message divs
+            # Try multiple selectors to find Claude's response
+            response_text = ""
+
+            # Try method 1: data-test-render-count
             messages = self.driver.find_elements(By.CSS_SELECTOR, "div[data-test-render-count]")
-
             if messages:
-                # Get the last message (Claude's response)
                 last_message = messages[-1]
-                response_text = last_message.text
+                response_text = last_message.text.strip()
+                print(f"  [DEBUG] Captured response (method 1): {response_text[:100]}...")
+
+            # Try method 2: Find by class name (common pattern)
+            if not response_text:
+                messages = self.driver.find_elements(By.CSS_SELECTOR, "div.font-claude-message")
+                if messages:
+                    last_message = messages[-1]
+                    response_text = last_message.text.strip()
+                    print(f"  [DEBUG] Captured response (method 2): {response_text[:100]}...")
+
+            # Try method 3: Find all divs with substantial text content
+            if not response_text:
+                all_divs = self.driver.find_elements(By.TAG_NAME, "div")
+                for div in reversed(all_divs):  # Check from bottom up
+                    text = div.text.strip()
+                    if len(text) > 20 and text != prompt[:100]:  # Not the prompt itself
+                        response_text = text
+                        print(f"  [DEBUG] Captured response (method 3): {response_text[:100]}...")
+                        break
+
+            if response_text:
+                print(f"  ✓ Response captured ({len(response_text)} characters)")
                 return response_text
             else:
-                print("⚠ Could not find response")
+                print("  ⚠ Could not extract response text from any method")
+                print("  ⚠ Trying to get page source for debugging...")
+                # Last resort - get full page text
+                body = self.driver.find_element(By.TAG_NAME, "body")
+                page_text = body.text
+                print(f"  [DEBUG] Full page text length: {len(page_text)}")
+                print(f"  [DEBUG] Last 500 chars: ...{page_text[-500:]}")
                 return ""
 
         except Exception as e:
             print(f"✗ Error sending prompt: {e}")
+            import traceback
+            traceback.print_exc()
             return ""
 
     def generate_title_browser(self) -> str:
@@ -214,6 +245,9 @@ JUST OUTPUT THE TITLE. No explanations."""
 
             response = self.send_prompt_and_wait(prompt, wait_time=60)
 
+            print(f"  [DEBUG] Raw response received: '{response[:200]}...'")
+            print(f"  [DEBUG] Response length: {len(response)} characters")
+
             # Clean up the response
             title = response.strip().strip('"\'')
 
@@ -225,6 +259,7 @@ JUST OUTPUT THE TITLE. No explanations."""
                     break
 
             print(f"\n📋 Generated Title:\n{title}\n")
+            print(f"  [DEBUG] Final title after processing: '{title}'")
 
             # Get user approval
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
@@ -263,6 +298,8 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
     def generate_description_browser(self, title: str) -> str:
         """Generate video description using Claude.ai Project with approval loop"""
         print("\n=== STEP 2: Generating Video Description (English) ===")
+        print(f"  [DEBUG] Title parameter received: '{title}'")
+        print(f"  [DEBUG] Title length: {len(title)} characters")
 
         while True:
             prompt = f"""Generate a video description for this title: "{title}"
@@ -1002,9 +1039,12 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             print("="*60)
 
             english_title = self.generate_title_browser()
+            print(f"\n  [DEBUG MAIN] Returned title: '{english_title}'")
+            print(f"  [DEBUG MAIN] Title type: {type(english_title)}, length: {len(english_title)}")
             time.sleep(5)
 
             english_description = self.generate_description_browser(english_title)
+            print(f"\n  [DEBUG MAIN] Returned description: '{english_description[:100]}...'")
             time.sleep(5)
 
             english_premise = self.generate_premise_browser(english_title)
