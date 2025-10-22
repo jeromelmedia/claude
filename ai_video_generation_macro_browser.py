@@ -650,7 +650,9 @@ Use the "korean video descriptions.txt" file in this project as reference for:
 
 REQUIREMENTS:
 - Write a LONG, DETAILED description (aim for 500-1000+ words)
-- Maximum 4000 characters
+- CRITICAL: You MUST keep the description under 5000 characters total
+- Write a complete, compelling description that naturally fits within this limit
+- DO NOT exceed 5000 characters - plan your content to fit within this constraint
 - Include multiple paragraphs
 - Explain what viewers will learn
 - Build curiosity and urgency
@@ -666,7 +668,7 @@ LANGUAGE REQUIREMENTS - CRITICAL:
 
 Write in pure English following that style.
 
-JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE."""
+JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE, but stay under 5000 characters."""
 
             response = self.send_prompt_and_wait(
                 prompt,
@@ -676,16 +678,17 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE.
             )
             description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
 
-            print(f"\nGenerated Description:\n{description}\n")
+            # Show character count
+            char_count = len(description)
+            print(f"\nGenerated Description ({char_count} characters):\n{description}\n")
+
+            if char_count > 5000:
+                print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
 
             if choice == 'a':
                 print("\nDescription approved\n")
-                # Enforce hard 4000 character limit
-                if len(description) > 4000:
-                    description = description[:4000]
-                    print(f"⚠ Description truncated to 4000 characters")
                 return description
             elif choice == 'd':
                 print("\nRegenerating...")
@@ -696,7 +699,7 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE.
 
 User wants this change: {modification}
 
-Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
+Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST OUTPUT THE NEW DESCRIPTION."""
 
                 response = self.send_prompt_and_wait(
                     modify_prompt,
@@ -705,14 +708,14 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
                     max_stability_checks=30
                 )
                 description = self.extract_generated_content(response, extract_all=True)  # Get full description
-                print(f"\nModified Description:\n{description}\n")
+                char_count = len(description)
+                print(f"\nModified Description ({char_count} characters):\n{description}\n")
+
+                if char_count > 5000:
+                    print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
                     print("\nDescription approved\n")
-                    # Enforce hard 4000 character limit
-                    if len(description) > 4000:
-                        description = description[:4000]
-                        print(f"⚠ Description truncated to 4000 characters")
                     return description
                 else:
                     print("\nStarting over...")
