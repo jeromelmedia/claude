@@ -196,106 +196,193 @@ class VideoGenerationMacroBrowser:
             return ""
 
     def generate_title_browser(self) -> str:
-        """Generate video title using Claude.ai Project"""
+        """Generate video title using Claude.ai Project with approval loop"""
         print("\n=== STEP 1: Generating Video Title (English) ===")
 
-        prompt = """DO NOT search or ask questions. Generate NOW.
+        while True:
+            prompt = """Generate a YouTube video title in English.
 
-Create ONE compelling YouTube video title in English for Korean seniors (60+) about health topics.
+Use the "korean video titles.txt" file in this project as reference for:
+- Topics to cover (health, finance, lifestyle for seniors 60+)
+- Title structure and format
+- Tone and urgency level
+- Use of numbers and specific details
 
-Use this EXACT format pattern from your reference files:
-[Expert/Authority] Reveals [Specific Number] [Item/Solution] That [Dramatic Benefit] in [Timeframe]! [Accessibility Detail] | [Category Tags]
+Create ONE title in English following that style.
 
-Example structure: "Doctor Reveals the $5 Superfood That Reverses Artery Blockage in 90 Days! Available at Any Grocery Store | Senior Health"
+JUST OUTPUT THE TITLE. No explanations."""
 
-Generate the title RIGHT NOW. Do not explain, do not ask questions, JUST OUTPUT THE TITLE."""
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
+            # Clean up the response
+            title = response.strip().strip('"\'')
 
-        # Clean up the response
-        title = response.strip()
-        # Remove any quotes or extra formatting
-        title = title.strip('"\'')
+            # Extract title if embedded in explanation
+            lines = title.split('\n')
+            for line in lines:
+                if line.strip() and ('"' in line or len(line) > 20):
+                    title = line.strip().strip('"\'')
+                    break
 
-        # If response contains explanations, extract just the title
-        lines = title.split('\n')
-        for line in lines:
-            if '|' in line or 'Doctor' in line or 'Reveals' in line:
-                title = line.strip()
-                break
+            print(f"\n📋 Generated Title:\n{title}\n")
 
-        print(f"\nGenerated English Title: {title}")
-        return title
+            # Get user approval
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Title approved: {title}")
+                return title
+            elif choice == 'd':
+                print("\n🔄 Regenerating title...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                print(f"\n✏️ Modifying title...")
+
+                modify_prompt = f"""Current title: "{title}"
+
+User wants this change: {modification}
+
+Generate the modified title. JUST OUTPUT THE NEW TITLE."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                title = response.strip().strip('"\'')
+                print(f"\n📋 Modified Title:\n{title}\n")
+
+                # Ask for approval again
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Title approved: {title}")
+                    return title
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_description_browser(self, title: str) -> str:
-        """Generate video description using Claude.ai Project"""
+        """Generate video description using Claude.ai Project with approval loop"""
         print("\n=== STEP 2: Generating Video Description (English) ===")
 
-        prompt = f"""DO NOT search or ask questions. Write the description NOW.
+        while True:
+            prompt = f"""Generate a video description for this title: "{title}"
 
-Title: "{title}"
+Use the "korean video descriptions.txt" file in this project as reference for:
+- Description format and structure
+- Tone and urgency
+- How to create curiosity
+- Call to action style
 
-Write a 3-4 sentence video description in English following this pattern:
-1. Start with shocking statistic or urgent statement
-2. Promise specific solution with numbers/timeline
-3. Create curiosity about the method
-4. End with "Watch now to learn..." call to action
+Write 2-4 sentences in English following that style.
 
-JUST OUTPUT THE DESCRIPTION. No explanations, no questions."""
+JUST OUTPUT THE DESCRIPTION."""
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
-        description = response.strip()
-        # Remove quotes if present
-        description = description.strip('"\'')
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            description = response.strip().strip('"\'')
 
-        print(f"\nGenerated English Description: {description[:200]}...")
-        return description
+            print(f"\n📋 Generated Description:\n{description}\n")
+
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Description approved")
+                return description
+            elif choice == 'd':
+                print("\n🔄 Regenerating description...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                modify_prompt = f"""Current description: "{description}"
+
+User wants this change: {modification}
+
+Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                description = response.strip().strip('"\'')
+                print(f"\n📋 Modified Description:\n{description}\n")
+
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Description approved")
+                    return description
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_premise_browser(self, title: str) -> str:
-        """Generate video premise using Claude.ai Project"""
+        """Generate video premise using Claude.ai Project with approval loop"""
         print("\n=== STEP 3: Generating Video Premise (English) ===")
 
-        prompt = f"""DO NOT search. Write the premise NOW.
+        while True:
+            prompt = f"""Generate a video premise based on this title: "{title}"
 
-Title: "{title}"
+Write 2-3 sentences in English that:
+- Introduce the expert/authority with years of experience
+- State the main discovery/solution with specific details
+- Preview the key benefits viewers will learn
 
-Write 2-3 sentences that:
-- Introduce the expert/authority (e.g., "A renowned cardiologist with 30 years of experience...")
-- State the main discovery/solution with specifics
-- Preview the benefits viewers will learn
+JUST OUTPUT THE PREMISE."""
 
-JUST OUTPUT THE PREMISE. No explanations."""
+            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            premise = response.strip().strip('"\'')
 
-        response = self.send_prompt_and_wait(prompt, wait_time=60)
-        premise = response.strip()
-        premise = premise.strip('"\'')
+            print(f"\n📋 Generated Premise:\n{premise}\n")
 
-        print(f"\nGenerated English Premise: {premise[:200]}...")
-        return premise
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Premise approved")
+                return premise
+            elif choice == 'd':
+                print("\n🔄 Regenerating premise...")
+                continue
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change? ")
+                modify_prompt = f"""Current premise: "{premise}"
+
+User wants this change: {modification}
+
+Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                premise = response.strip().strip('"\'')
+                print(f"\n📋 Modified Premise:\n{premise}\n")
+
+                if input("Approve this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Premise approved")
+                    return premise
+                else:
+                    print("\n🔄 Starting over...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
         """Generate one segment of the script using Claude.ai Project"""
 
-        prompt = f"""DO NOT search. Write segment {segment_num} NOW.
+        prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
 
 Title: "{title}"
 Premise: {premise}
 
-Write script segment {segment_num} of {total_segments} ({6500 // total_segments} words).
+Target: {6500 // total_segments} words for this segment
 
-REQUIRED ELEMENTS FOR THIS SEGMENT:
+SEGMENT FOCUS:
 {self._get_segment_focus(segment_num, total_segments)}
 
-WRITING STYLE (match your reference scripts):
-- Dramatic opening with real emergency story
-- Expert credibility (25-40 years experience)
-- Patient case studies with SPECIFIC details (ages, timelines, measurements)
-- Conversational tone for seniors
-- Lots of "you" language
+WRITING STYLE - Match the Korean .txt script files in this project:
+- Use their dramatic storytelling style
+- Copy their structure (opening hooks, patient stories, expert credibility, solutions, timelines)
+- Match their tone for seniors (60+)
+- Include specific numbers, ages, measurements like they do
+- Use "you" language and conversational style
 - Scientific explanations in simple terms
-- Specific numbers and timelines
 
-JUST WRITE THE SCRIPT. No explanations, no questions."""
+JUST WRITE THE SCRIPT SEGMENT IN ENGLISH."""
 
         response = self.send_prompt_and_wait(prompt, wait_time=120)
         return response.strip()
@@ -367,7 +454,55 @@ Generate the ADDITIONAL content only:"""
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
-        return full_script
+        # Show preview and get approval
+        while True:
+            print("\n" + "="*60)
+            print("SCRIPT PREVIEW (first 500 characters):")
+            print(full_script[:500] + "...")
+            print("="*60)
+
+            choice = input("\nOptions: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
+
+            if choice == 'a':
+                print(f"✓ Script approved")
+                return full_script
+            elif choice == 'd':
+                print("\n🔄 Regenerating entire script from scratch...")
+                # Recursive call to regenerate
+                return self.generate_full_script_browser(title, premise)
+            elif choice == 'm':
+                modification = input("\nWhat would you like to change in the script? ")
+                print(f"\n✏️ Modifying script...")
+
+                modify_prompt = f"""Current script ({total_words} words):
+
+{full_script[:2000]}... [script continues]
+
+User wants this change: {modification}
+
+Generate the modified FULL script incorporating this change. Keep it 6000-7000 words.
+
+JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
+
+                response = self.send_prompt_and_wait(modify_prompt, wait_time=180)
+                full_script = response.strip()
+                total_words = len(full_script.split())
+
+                print(f"\n✓ Modified script word count: {total_words} words")
+                print("\n" + "="*60)
+                print("MODIFIED SCRIPT PREVIEW:")
+                print(full_script[:500] + "...")
+                print("="*60)
+
+                if input("\nApprove this version? [y/n]: ").lower() == 'y':
+                    print(f"✓ Script approved")
+                    return full_script
+                else:
+                    print("\n🔄 Continuing with modifications...")
+                    continue
+            else:
+                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                continue
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
         """Translate text to Korean using Claude.ai Project"""
