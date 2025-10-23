@@ -348,7 +348,16 @@ class VideoGenerationMacroBrowser:
                 for (var i = 0; i < selectors.length; i++) {
                     var elements = document.querySelectorAll(selectors[i]);
                     for (var j = 0; j < elements.length; j++) {
-                        var text = elements[j].innerText || elements[j].textContent;
+                        // Scroll element into view to ensure all content is loaded (for lazy-loading)
+                        try {
+                            elements[j].scrollIntoView({behavior: 'instant', block: 'nearest'});
+                        } catch (e) {}
+
+                        // Get text using multiple methods and pick the longest
+                        var text1 = elements[j].innerText || '';
+                        var text2 = elements[j].textContent || '';
+                        var text = text1.length > text2.length ? text1 : text2;
+
                         if (text && text.length > 20) {
                             allMessages.push({
                                 text: text.trim(),
@@ -360,14 +369,15 @@ class VideoGenerationMacroBrowser:
                     }
                 }
 
-                // Return the last non-empty message
+                // Return the LONGEST message (likely the full response)
                 if (allMessages.length > 0) {
-                    // Sort by appearance order and get last
-                    var lastMsg = allMessages[allMessages.length - 1];
+                    // Sort by length descending to get longest message
+                    allMessages.sort(function(a, b) { return b.length - a.length; });
+                    var longestMsg = allMessages[0];
                     return JSON.stringify({
                         success: true,
-                        text: lastMsg.text,
-                        method: lastMsg.selector,
+                        text: longestMsg.text,
+                        method: longestMsg.selector,
                         count: allMessages.length
                     });
                 }
@@ -393,7 +403,8 @@ class VideoGenerationMacroBrowser:
                     for div in reversed(all_divs):
                         try:
                             text = div.text.strip()
-                            if text and len(text) > 20 and len(text) < 5000:
+                            # REMOVED 5000 char limit - scripts can be 40,000+ characters!
+                            if text and len(text) > 20:
                                 # Don't include if it contains the prompt
                                 if prompt[:30] not in text:
                                     response_text = text
