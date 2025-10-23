@@ -546,6 +546,10 @@ class VideoGenerationMacroBrowser:
                     is_process = True
                     break
 
+            # Skip hashtag lines (they shouldn't be extracted as content)
+            if line_stripped.startswith('#') or (line_stripped.count('#') > 2):
+                continue
+
             if not is_process and len(line_stripped) > 15:
                 candidates.append(line_stripped)
 
