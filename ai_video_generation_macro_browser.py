@@ -139,7 +139,8 @@ class VideoGenerationMacroBrowser:
 
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
                              stabilization_wait: int = 20, max_stability_checks: int = 15,
-                             stability_threshold: int = 5, stability_check_interval: int = 5) -> str:
+                             stability_threshold: int = 5, stability_check_interval: int = 5,
+                             previous_content_to_filter: str = "") -> str:
         """
         Send a prompt to Claude and wait for response
 
@@ -150,6 +151,7 @@ class VideoGenerationMacroBrowser:
             max_stability_checks: Max number of stability checks (default 15)
             stability_threshold: Number of consecutive stable checks required (default 5)
             stability_check_interval: Seconds to wait between stability checks (default 5)
+            previous_content_to_filter: Previous content to filter out from extraction (e.g., description text)
         """
         try:
             # Retry logic for DOM issues
@@ -332,8 +334,9 @@ class VideoGenerationMacroBrowser:
                     time.sleep(3)
 
                 # JavaScript approach - scan the DOM and extract last message
-                # Pass the prompt to JavaScript so we can filter it out
+                # Pass the prompt and previous content to JavaScript so we can filter them out
                 prompt_start = prompt[:50].replace("'", "\\'").replace("\n", " ")
+                prev_content_start = previous_content_to_filter[:100].replace("'", "\\'").replace("\n", " ") if previous_content_to_filter else ""
 
                 js_extract_script = f"""
                 // Find all potential message containers
@@ -348,6 +351,7 @@ class VideoGenerationMacroBrowser:
 
                 var allMessages = [];
                 var promptStart = '{prompt_start}';
+                var prevContentStart = '{prev_content_start}';
 
                 for (var i = 0; i < selectors.length; i++) {{
                     var elements = document.querySelectorAll(selectors[i]);
@@ -364,6 +368,11 @@ class VideoGenerationMacroBrowser:
 
                         // CRITICAL: Skip if this contains the user's prompt
                         if (text && text.indexOf(promptStart) !== -1) {{
+                            continue;
+                        }}
+
+                        // CRITICAL: Skip if this contains previous content (e.g., description)
+                        if (prevContentStart && text && text.indexOf(prevContentStart) !== -1) {{
                             continue;
                         }}
 
@@ -519,7 +528,7 @@ class VideoGenerationMacroBrowser:
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
 
-        # Filter out lines that are clearly Claude's internal process
+        # Filter out lines that are clearly Claude's internal process or call-to-action
         skip_patterns = [
             'I need to',
             'I\'ll search',
@@ -538,7 +547,12 @@ class VideoGenerationMacroBrowser:
             'relevant sections',
             'Reading the',
             'Reading another',
-            'Now I understand'
+            'Now I understand',
+            '👉',  # Filter out emoji-based call-to-actions
+            'Subscribe',
+            'turn on notifications',
+            'Drop a comment',
+            'never miss'
         ]
 
         # Collect candidate lines (not process text)
@@ -756,7 +770,7 @@ Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
                 continue
 
-    def generate_premise_browser(self, title: str) -> str:
+    def generate_premise_browser(self, title: str, description: str = "") -> str:
         """Generate video premise using Claude.ai Project with approval loop"""
         print("\n=== STEP 3: Generating Video Premise ===")
 
@@ -782,7 +796,8 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 prompt,
                 wait_time=90,
                 stabilization_wait=25,
-                max_stability_checks=20
+                max_stability_checks=20,
+                previous_content_to_filter=description  # Filter out description from extraction
             )
             premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
 
@@ -808,7 +823,8 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                     modify_prompt,
                     wait_time=90,
                     stabilization_wait=25,
-                    max_stability_checks=20
+                    max_stability_checks=20,
+                    previous_content_to_filter=description  # Filter out description from extraction
                 )
                 premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
                 print(f"\nModified Premise:\n{premise}\n")
@@ -1744,7 +1760,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             english_description = self.generate_description_browser(english_title)
             time.sleep(5)
 
-            english_premise = self.generate_premise_browser(english_title)
+            english_premise = self.generate_premise_browser(english_title, english_description)
             time.sleep(5)
 
             english_script = self.generate_full_script_browser(english_title, english_premise)
