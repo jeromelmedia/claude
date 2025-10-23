@@ -815,7 +815,7 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 max_stability_checks=20,
                 previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
             )
-            premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=True, filter_previous_content=description)  # Extract ALL lines for 2-3 sentence premise
+            premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Extract ALL lines for 2-3 sentence premise
 
             print(f"\nGenerated Premise:\n{premise}\n")
 
@@ -842,7 +842,7 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                     max_stability_checks=20,
                     previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
                 )
-                premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=True, filter_previous_content=description)  # Extract ALL lines for 2-3 sentence premise
+                premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Extract ALL lines for 2-3 sentence premise
                 print(f"\nModified Premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
