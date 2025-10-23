@@ -495,7 +495,7 @@ class VideoGenerationMacroBrowser:
             traceback.print_exc()
             return ""
 
-    def extract_generated_content(self, response: str, extract_all: bool = False) -> str:
+    def extract_generated_content(self, response: str, extract_all: bool = False, filter_hashtags: bool = False) -> str:
         """
         Extract the actual generated content from Claude's response,
         filtering out thinking, searching, and explanatory text.
@@ -504,6 +504,8 @@ class VideoGenerationMacroBrowser:
             response: The raw response from Claude
             extract_all: If True, return ALL content lines (for scripts).
                         If False, return only the last line (for titles/descriptions).
+            filter_hashtags: If True, filter out lines containing hashtags (for premises).
+                           If False, keep hashtags (for descriptions).
         """
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
@@ -546,8 +548,8 @@ class VideoGenerationMacroBrowser:
                     is_process = True
                     break
 
-            # Skip hashtag lines (they shouldn't be extracted as content)
-            if line_stripped.startswith('#') or (line_stripped.count('#') > 2):
+            # Skip hashtag lines only if filter_hashtags is True (for premises)
+            if filter_hashtags and (line_stripped.startswith('#') or (line_stripped.count('#') > 2)):
                 continue
 
             if not is_process and len(line_stripped) > 15:
@@ -697,7 +699,7 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE,
                 stabilization_wait=30,  # Extra long initial wait
                 max_stability_checks=30  # More checks to ensure completion
             )
-            description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
+            description = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Get full description WITH hashtags
 
             # Show character count
             char_count = len(description)
@@ -728,7 +730,7 @@ Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST
                     stabilization_wait=30,
                     max_stability_checks=30
                 )
-                description = self.extract_generated_content(response, extract_all=True)  # Get full description
+                description = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Get full description WITH hashtags
                 char_count = len(description)
                 print(f"\nModified Description ({char_count} characters):\n{description}\n")
 
@@ -773,7 +775,7 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 stabilization_wait=25,
                 max_stability_checks=20
             )
-            premise = self.extract_generated_content(response)
+            premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
 
             print(f"\nGenerated Premise:\n{premise}\n")
 
@@ -799,7 +801,7 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                     stabilization_wait=25,
                     max_stability_checks=20
                 )
-                premise = self.extract_generated_content(response)
+                premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
                 print(f"\nModified Premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
