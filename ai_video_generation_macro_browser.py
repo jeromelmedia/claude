@@ -334,9 +334,8 @@ class VideoGenerationMacroBrowser:
                     time.sleep(3)
 
                 # JavaScript approach - scan the DOM and extract last message
-                # Pass the prompt and previous content to JavaScript so we can filter them out
+                # Only filter out the prompt at JS level (don't filter previous content here)
                 prompt_start = prompt[:50].replace("'", "\\'").replace("\n", " ")
-                prev_content_start = previous_content_to_filter[:100].replace("'", "\\'").replace("\n", " ") if previous_content_to_filter else ""
 
                 js_extract_script = f"""
                 // Find all potential message containers
@@ -351,7 +350,6 @@ class VideoGenerationMacroBrowser:
 
                 var allMessages = [];
                 var promptStart = '{prompt_start}';
-                var prevContentStart = '{prev_content_start}';
 
                 for (var i = 0; i < selectors.length; i++) {{
                     var elements = document.querySelectorAll(selectors[i]);
@@ -368,11 +366,6 @@ class VideoGenerationMacroBrowser:
 
                         // CRITICAL: Skip if this contains the user's prompt
                         if (text && text.indexOf(promptStart) !== -1) {{
-                            continue;
-                        }}
-
-                        // CRITICAL: Skip if this contains previous content (e.g., description)
-                        if (prevContentStart && text && text.indexOf(prevContentStart) !== -1) {{
                             continue;
                         }}
 
@@ -513,7 +506,7 @@ class VideoGenerationMacroBrowser:
             traceback.print_exc()
             return ""
 
-    def extract_generated_content(self, response: str, extract_all: bool = False, filter_hashtags: bool = False) -> str:
+    def extract_generated_content(self, response: str, extract_all: bool = False, filter_hashtags: bool = False, filter_previous_content: str = "") -> str:
         """
         Extract the actual generated content from Claude's response,
         filtering out thinking, searching, and explanatory text.
@@ -524,6 +517,7 @@ class VideoGenerationMacroBrowser:
                         If False, return only the last line (for titles/descriptions).
             filter_hashtags: If True, filter out lines containing hashtags (for premises).
                            If False, keep hashtags (for descriptions).
+            filter_previous_content: Previous content to filter out (e.g., description text when extracting premise).
         """
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
@@ -557,6 +551,12 @@ class VideoGenerationMacroBrowser:
 
         # Collect candidate lines (not process text)
         candidates = []
+
+        # If we have previous content to filter, split it into lines for comparison
+        previous_lines = []
+        if filter_previous_content:
+            previous_lines = [l.strip() for l in filter_previous_content.split('\n') if l.strip()]
+
         for line in lines:
             line_stripped = line.strip()
 
@@ -574,6 +574,22 @@ class VideoGenerationMacroBrowser:
             # Skip hashtag lines only if filter_hashtags is True (for premises)
             if filter_hashtags and (line_stripped.startswith('#') or (line_stripped.count('#') > 2)):
                 continue
+
+            # CRITICAL: Skip lines that match previous content (e.g., description when extracting premise)
+            if filter_previous_content:
+                # Check if this line matches any line from previous content
+                is_previous_content = False
+                for prev_line in previous_lines:
+                    # Check if line is similar to previous content (allow some flexibility)
+                    if len(prev_line) > 20 and prev_line[:50] in line_stripped:
+                        is_previous_content = True
+                        break
+                    if len(line_stripped) > 20 and line_stripped[:50] in prev_line:
+                        is_previous_content = True
+                        break
+
+                if is_previous_content:
+                    continue
 
             if not is_process and len(line_stripped) > 15:
                 candidates.append(line_stripped)
@@ -797,9 +813,9 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 wait_time=90,
                 stabilization_wait=25,
                 max_stability_checks=20,
-                previous_content_to_filter=description  # Filter out description from extraction
+                previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
             )
-            premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
+            premise = self.extract_generated_content(response, filter_hashtags=True, filter_previous_content=description)  # Filter out hashtags AND description from premise
 
             print(f"\nGenerated Premise:\n{premise}\n")
 
@@ -824,9 +840,9 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                     wait_time=90,
                     stabilization_wait=25,
                     max_stability_checks=20,
-                    previous_content_to_filter=description  # Filter out description from extraction
+                    previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
                 )
-                premise = self.extract_generated_content(response, filter_hashtags=True)  # Filter out hashtags from premise
+                premise = self.extract_generated_content(response, filter_hashtags=True, filter_previous_content=description)  # Filter out hashtags AND description from premise
                 print(f"\nModified Premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
