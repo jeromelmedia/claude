@@ -524,7 +524,10 @@ class VideoGenerationMacroBrowser:
             'results',
             'Show working file',
             'TEXT',
-            'relevant sections'
+            'relevant sections',
+            'Reading the',
+            'Reading another',
+            'Now I understand'
         ]
 
         # Collect candidate lines (not process text)
