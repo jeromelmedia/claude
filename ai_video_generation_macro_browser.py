@@ -1488,12 +1488,55 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
         temp_with_subs = (working_dir / "temp_with_subs.mp4").resolve()
 
         try:
-            # Step 1: Create 90-second looped video
-            print("[1/6] Looping video to 90s...")
+            # Step 1: Create boomerang (ping-pong) effect for the talking person video
+            temp_forward = (working_dir / "temp_forward.mp4").resolve()
+            temp_reverse = (working_dir / "temp_reverse.mp4").resolve()
+            temp_pingpong = (working_dir / "temp_pingpong.mp4").resolve()
+            pingpong_list = (working_dir / "pingpong_list.txt").resolve()
+
+            print("[1/7] Creating boomerang effect...")
+
+            # Create forward version (no audio)
+            forward_cmd = [
+                'ffmpeg', '-y',
+                '-i', self.selected_character_video,
+                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                '-an',  # No audio
+                str(temp_forward)
+            ]
+            subprocess.run(forward_cmd, capture_output=True, check=True)
+
+            # Create reverse version
+            reverse_cmd = [
+                'ffmpeg', '-y',
+                '-i', self.selected_character_video,
+                '-vf', 'reverse',
+                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                '-an',  # No audio
+                str(temp_reverse)
+            ]
+            subprocess.run(reverse_cmd, capture_output=True, check=True)
+
+            # Concatenate forward + reverse to create ping-pong effect
+            with open(pingpong_list, 'w', encoding='utf-8') as f:
+                f.write(f"file '{temp_forward}'\n")
+                f.write(f"file '{temp_reverse}'\n")
+
+            pingpong_cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat', '-safe', '0',
+                '-i', str(pingpong_list),
+                '-c', 'copy',
+                str(temp_pingpong)
+            ]
+            subprocess.run(pingpong_cmd, capture_output=True, check=True)
+
+            # Step 2: Loop the boomerang video to 90 seconds
+            print("[2/7] Looping boomerang to 90s...")
             loop_cmd = [
                 'ffmpeg', '-y',
                 '-stream_loop', '-1',  # Loop indefinitely
-                '-i', self.selected_character_video,
+                '-i', str(temp_pingpong),
                 '-t', '90',  # 90 seconds
                 '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                 '-an',  # No audio
@@ -1501,8 +1544,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             ]
             subprocess.run(loop_cmd, capture_output=True, check=True)
 
-            # Step 2: Create video segments from images
-            print(f"[2/6] Creating image segments...")
+            # Step 3: Create video segments from images
+            print(f"[3/7] Creating image segments...")
 
             remaining_duration = voiceover_duration - 90
             if remaining_duration <= 0:
@@ -1528,8 +1571,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
                     subprocess.run(img_cmd, capture_output=True, check=True)
                     image_segments.append(temp_img_video)
 
-            # Step 3: Concatenate all segments
-            print("[3/6] Concatenating segments...")
+            # Step 4: Concatenate all segments
+            print("[4/7] Concatenating segments...")
 
             # Create concat list
             with open(temp_concat_list, 'w', encoding='utf-8') as f:
@@ -1547,8 +1590,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             ]
             subprocess.run(concat_cmd, capture_output=True, check=True)
 
-            # Step 4: Add subtitles
-            print("[4/6] Burning subtitles...")
+            # Step 5: Add subtitles
+            print("[5/7] Burning subtitles...")
 
             # Use a different approach: copy subtitles to working dir with simple name to avoid path escaping issues
             simple_subtitle_path = (working_dir / "subs.srt").resolve()
@@ -1579,8 +1622,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
                 # Clean up temporary subtitle copy
                 simple_subtitle_path.unlink(missing_ok=True)
 
-            # Step 5: Add voiceover
-            print("[5/6] Adding voiceover...")
+            # Step 6: Add voiceover
+            print("[6/7] Adding voiceover...")
 
             final_cmd = [
                 'ffmpeg', '-y',
@@ -1595,8 +1638,12 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             ]
             subprocess.run(final_cmd, capture_output=True, check=True)
 
-            # Step 6: Cleanup
-            print("[6/6] Cleaning up...")
+            # Step 7: Cleanup
+            print("[7/7] Cleaning up...")
+            temp_forward.unlink(missing_ok=True)
+            temp_reverse.unlink(missing_ok=True)
+            temp_pingpong.unlink(missing_ok=True)
+            pingpong_list.unlink(missing_ok=True)
             temp_looped.unlink(missing_ok=True)
             temp_concat_list.unlink(missing_ok=True)
             temp_concatenated.unlink(missing_ok=True)
