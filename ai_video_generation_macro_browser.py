@@ -973,6 +973,11 @@ Generate the ADDITIONAL content only:"""
                 # If script is short, just show it all
                 print(full_script + "\n")
 
+            # Show last 20 words for validation
+            words = full_script.strip().split()
+            last_20_words = ' '.join(words[-20:])
+            print(f"Last 20 words: ...{last_20_words}\n")
+
             choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
 
             if choice == 'a':
@@ -1048,6 +1053,74 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             max_stability_checks=checks
         )
         return response.strip()
+
+    def validate_script_endings(self, english_script: str, korean_script: str) -> bool:
+        """Validate that Korean translation is complete by checking if endings match"""
+        print("\n=== Validating Translation Completeness ===")
+
+        # Get last sentence from English script
+        import re
+        english_sentences = re.split(r'(?<=[.!?])\s+', english_script.strip())
+        english_sentences = [s.strip() for s in english_sentences if s.strip()]
+
+        if not english_sentences:
+            print("⚠ WARNING: Could not parse English script into sentences")
+            return False
+
+        last_english_sentence = english_sentences[-1]
+
+        # Get last ~20 words from English script
+        english_words = english_script.strip().split()
+        last_20_english = ' '.join(english_words[-20:])
+
+        # Get last ~20 words from Korean script
+        korean_words = korean_script.strip().split()
+        last_20_korean = ' '.join(korean_words[-20:])
+
+        print(f"\nLast 20 words of English script:")
+        print(f"  ...{last_20_english}")
+        print(f"\nLast 20 words of Korean script:")
+        print(f"  ...{last_20_korean}")
+
+        # Now translate just the last English sentence to verify
+        print(f"\nVerifying translation of final sentence...")
+        print(f"Final English sentence: {last_english_sentence}")
+
+        validation_prompt = f"""Translate ONLY this sentence to Korean:
+
+{last_english_sentence}
+
+JUST OUTPUT THE KOREAN TRANSLATION. No explanations."""
+
+        response = self.send_prompt_and_wait(
+            validation_prompt,
+            wait_time=60,
+            stabilization_wait=15,
+            max_stability_checks=10
+        )
+
+        expected_korean_ending = response.strip()
+        print(f"\nExpected Korean ending: {expected_korean_ending}")
+
+        # Check if Korean script ends with something similar to the expected ending
+        # We'll check if the last ~100 characters of Korean script contain the expected ending
+        korean_tail = korean_script.strip()[-200:].strip()
+
+        # Simple check: does the Korean script end with similar content?
+        # We can't do exact match due to minor formatting differences
+        similarity_found = expected_korean_ending[:30] in korean_tail if len(expected_korean_ending) > 30 else expected_korean_ending[:15] in korean_tail
+
+        if similarity_found:
+            print("✓ Translation appears complete - endings match!\n")
+            return True
+        else:
+            print("⚠ WARNING: Translation ending doesn't match expected translation!")
+            print("This might indicate the translation was truncated.\n")
+            print(f"Looking for: {expected_korean_ending[:50]}...")
+            print(f"Found at end: {korean_tail[-100:]}\n")
+
+            choice = input("Continue anyway? [y/n]: ").lower()
+            return choice == 'y'
 
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
         """Translate full script to Korean using uploaded file"""
@@ -1614,6 +1687,30 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
             english_script = self.generate_full_script_browser(english_title, english_premise)
 
+            # Validate English script was fully captured
+            print("\n=== Validating English Script Capture ===")
+            script_words = english_script.strip().split()
+            script_chars = len(english_script)
+            last_30_words = ' '.join(script_words[-30:])
+
+            print(f"Script stats:")
+            print(f"  Total words: {len(script_words)}")
+            print(f"  Total characters: {script_chars}")
+            print(f"  Last 30 words: ...{last_30_words}")
+
+            # Verify it's not truncated by checking it ends with a sentence-ending punctuation
+            if english_script.strip()[-1] not in '.!?':
+                print("\n⚠ WARNING: Script doesn't end with sentence-ending punctuation!")
+                print("This might indicate truncation.")
+                choice = input("Continue anyway? [y/n]: ").lower()
+                if choice != 'y':
+                    print("Script rejected. Please regenerate.")
+                    if self.driver:
+                        self.driver.quit()
+                    return
+            else:
+                print("✓ Script appears complete (ends with proper punctuation)\n")
+
             # === CREATE OUTPUT FOLDER ===
             folder_name = self.sanitize_filename(english_title)
             self.working_dir = self.base_output_dir / folder_name
@@ -1661,6 +1758,15 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
             # Translate full script using uploaded file (not chunks)
             korean_script = self.translate_script_to_korean_browser(str(script_path))
+
+            # Validate translation completeness by comparing endings
+            validation_passed = self.validate_script_endings(english_script, korean_script)
+
+            if not validation_passed:
+                print("Validation failed. Exiting.")
+                if self.driver:
+                    self.driver.quit()
+                return
 
             # Save Korean title as separate file
             korean_title_path = self.working_dir / "video_title_korean.txt"
