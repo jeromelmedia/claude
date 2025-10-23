@@ -332,7 +332,10 @@ class VideoGenerationMacroBrowser:
                     time.sleep(3)
 
                 # JavaScript approach - scan the DOM and extract last message
-                js_extract_script = """
+                # Pass the prompt to JavaScript so we can filter it out
+                prompt_start = prompt[:50].replace("'", "\\'").replace("\n", " ")
+
+                js_extract_script = f"""
                 // Find all potential message containers
                 var selectors = [
                     'div[data-test-render-count]',
@@ -344,45 +347,51 @@ class VideoGenerationMacroBrowser:
                 ];
 
                 var allMessages = [];
+                var promptStart = '{prompt_start}';
 
-                for (var i = 0; i < selectors.length; i++) {
+                for (var i = 0; i < selectors.length; i++) {{
                     var elements = document.querySelectorAll(selectors[i]);
-                    for (var j = 0; j < elements.length; j++) {
+                    for (var j = 0; j < elements.length; j++) {{
                         // Scroll element into view to ensure all content is loaded (for lazy-loading)
-                        try {
-                            elements[j].scrollIntoView({behavior: 'instant', block: 'nearest'});
-                        } catch (e) {}
+                        try {{
+                            elements[j].scrollIntoView({{behavior: 'instant', block: 'nearest'}});
+                        }} catch (e) {{}}
 
                         // Get text using multiple methods and pick the longest
                         var text1 = elements[j].innerText || '';
                         var text2 = elements[j].textContent || '';
                         var text = text1.length > text2.length ? text1 : text2;
 
-                        if (text && text.length > 20) {
-                            allMessages.push({
+                        // CRITICAL: Skip if this contains the user's prompt
+                        if (text && text.indexOf(promptStart) !== -1) {{
+                            continue;
+                        }}
+
+                        if (text && text.length > 20) {{
+                            allMessages.push({{
                                 text: text.trim(),
                                 length: text.length,
                                 selector: selectors[i],
                                 index: j
-                            });
-                        }
-                    }
-                }
+                            }});
+                        }}
+                    }}
+                }}
 
                 // Return the LONGEST message (likely the full response)
-                if (allMessages.length > 0) {
+                if (allMessages.length > 0) {{
                     // Sort by length descending to get longest message
-                    allMessages.sort(function(a, b) { return b.length - a.length; });
+                    allMessages.sort(function(a, b) {{ return b.length - a.length; }});
                     var longestMsg = allMessages[0];
-                    return JSON.stringify({
+                    return JSON.stringify({{
                         success: true,
                         text: longestMsg.text,
                         method: longestMsg.selector,
                         count: allMessages.length
-                    });
-                }
+                    }});
+                }}
 
-                return JSON.stringify({success: false, text: '', count: 0});
+                return JSON.stringify({{success: false, text: '', count: 0}});
                 """
 
                 try:
