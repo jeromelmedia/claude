@@ -258,7 +258,7 @@ class VideoGenerationMacro:
                     system=self.custom_instructions,
                     messages=[{
                         "role": "user",
-                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description. This should be 2-4 sentences that will appear in the video description box on YouTube. Make it engaging and include a call-to-action if appropriate."
+                        "content": f"Based on the video title '{english_title}' and using the description format/style from the project files, write a compelling video description for YouTube. \n\nIMPORTANT FORMATTING REQUIREMENTS:\n- Use proper paragraph breaks (line breaks) to separate different sections\n- Make it visually appealing and easy to read when copy-pasted into YouTube\n- Include line breaks between main points\n- Add proper spacing for readability\n\nThe description should be engaging and include a call-to-action if appropriate. CRITICAL: You MUST keep the description under 5000 characters. Write a complete, compelling description that naturally fits within this limit without needing truncation."
                     }]
                 )
                 break
@@ -271,8 +271,22 @@ class VideoGenerationMacro:
                     raise
 
         english_description = message.content[0].text.strip()
+
+        # Verify it's under 5000 characters
+        if len(english_description) > 5000:
+            print(f"⚠ Warning: Description is {len(english_description)} characters (over 5000 limit)")
+        else:
+            print(f"✓ Description length: {len(english_description)} characters")
+
         print(f"\nGenerated English Description:\n{english_description}")
         print(f"✓ Auto-approved (running in full automation mode)")
+
+        # Save English description to file with proper formatting
+        description_path = self.working_dir / "video_description_english.txt"
+        with open(description_path, 'w', encoding='utf-8') as f:
+            # Write description with proper line breaks preserved
+            f.write(english_description)
+        print(f"✓ English description saved to: {description_path}")
 
         # Delay after heavy API call to avoid rate limiting
         # With 50K tokens/min limit and ~20K per call, we need 60+ seconds between calls
@@ -346,6 +360,21 @@ Target words for this segment: approximately {target_words_per_segment} words.
 
         prompt += f"\n\nWrite approximately {target_words_per_segment} words in your trained writing style."
 
+        # Add language and formatting requirements
+        prompt += """\n
+CRITICAL LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH language only
+- DO NOT include ANY Korean words, phrases, or greetings
+- DO NOT mix languages (no "여러분", "안녕하세요", etc.)
+- Use ONLY English vocabulary throughout
+- NO fabricated quotes or testimonials - describe patient stories without quotation marks
+
+FORMATTING REQUIREMENTS:
+- Use proper paragraph breaks (blank lines between paragraphs)
+- Format the script so it's easy to read when saved to a text file
+- Add line breaks between distinct sections or topics
+- DO NOT write everything as one continuous block of text"""
+
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -405,7 +434,13 @@ Target words for this segment: approximately {target_words_per_segment} words.
 Title: {english_title}
 Premise: {english_premise}
 
-Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target."""
+Add more content to expand on the topic. Write approximately {6000 - total_words} more words to reach the target.
+
+FORMATTING REQUIREMENTS:
+- Use proper paragraph breaks (blank lines between paragraphs)
+- Format the script so it's easy to read when saved to a text file
+- Add line breaks between distinct sections or topics
+- DO NOT write everything as one continuous block of text"""
 
             max_retries = 3
             for attempt in range(max_retries):
@@ -434,20 +469,35 @@ Add more content to expand on the topic. Write approximately {6000 - total_words
             print("  ⏱ Waiting 65 seconds to avoid rate limit...")
             time.sleep(65)
 
-        # If over 7000 words, trim
+        # Accept the full script length (no trimming)
+        # The voiceover API can handle longer scripts, and we don't want to cut off important content
         if total_words > 7000:
-            print(f"\nWord count ({total_words}) exceeds target. Trimming to ~7000 words...")
-            words = full_script.split()
-            full_script = " ".join(words[:7000])
-            total_words = 7000
+            print(f"\n✓ Script is {total_words} words (above 7000 word target, but keeping full content)")
 
         print(f"\n✓ Final English script word count: {total_words} words")
 
-        # Show preview
+        # Show preview - first and last sentences
         print("\n" + "=" * 60)
-        print("SCRIPT PREVIEW (first 500 characters):")
+        print("SCRIPT PREVIEW (start and end):")
         print("=" * 60)
-        print(full_script[:500] + "...")
+
+        # Split into sentences (simple approach - split on . ! ?)
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', full_script)
+        sentences = [s.strip() for s in sentences if s.strip()]
+
+        # Get first 3 and last 3 sentences
+        num_preview_sentences = 3
+        if len(sentences) > num_preview_sentences * 2:
+            first_sentences = ' '.join(sentences[:num_preview_sentences])
+            last_sentences = ' '.join(sentences[-num_preview_sentences:])
+            print(f"{first_sentences}")
+            print("\n[... middle of script ...]\n")
+            print(f"{last_sentences}")
+        else:
+            # If script is short, just show it all
+            print(full_script)
+
         print("=" * 60)
         print(f"\n✓ Auto-approved (running in full automation mode)")
 
@@ -543,6 +593,13 @@ PREMISE: [Korean translation]"""
         print(f"✓ Korean title: {korean_title}")
         print(f"✓ Korean description: {korean_description[:100]}...")
         print(f"✓ Korean premise: {korean_premise[:100]}...")
+
+        # Save Korean description to file with proper formatting
+        korean_description_path = self.working_dir / "video_description_korean.txt"
+        with open(korean_description_path, 'w', encoding='utf-8') as f:
+            # Write description with proper line breaks preserved
+            f.write(korean_description)
+        print(f"✓ Korean description saved to: {korean_description_path}")
 
         time.sleep(2)  # Small delay
 
@@ -1020,14 +1077,72 @@ PREMISE: [Korean translation]"""
         # Build video with FFmpeg
         print("\n🎬 Building video with FFmpeg...")
 
-        # Step 1: Create 90-second looped video segment
+        # Step 1: Create boomerang (ping-pong) effect for the talking person video
+        temp_forward = self.working_dir / "temp_forward.mp4"
+        temp_reverse = self.working_dir / "temp_reverse.mp4"
+        temp_pingpong = self.working_dir / "temp_pingpong.mp4"
         temp_video_90s = self.working_dir / "temp_video_90s.mp4"
-        print("  [1/6] Creating 90-second looped video...")
 
+        print("  [1/7] Creating boomerang effect...")
+
+        # Create forward version (no audio)
+        forward_cmd = [
+            'ffmpeg', '-y',
+            '-i', str(video_path),
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-an',  # No audio
+            str(temp_forward)
+        ]
+        result = subprocess.run(forward_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error creating forward video: {result.stderr}")
+            sys.exit(1)
+
+        # Create reverse version
+        reverse_cmd = [
+            'ffmpeg', '-y',
+            '-i', str(video_path),
+            '-vf', 'reverse',
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '23',
+            '-an',  # No audio
+            str(temp_reverse)
+        ]
+        result = subprocess.run(reverse_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error creating reverse video: {result.stderr}")
+            sys.exit(1)
+
+        # Concatenate forward + reverse to create ping-pong effect
+        pingpong_list = self.working_dir / "pingpong_list.txt"
+        with open(pingpong_list, 'w', encoding='utf-8') as f:
+            f.write(f"file '{temp_forward.name}'\n")
+            f.write(f"file '{temp_reverse.name}'\n")
+
+        pingpong_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat',
+            '-safe', '0',
+            '-i', str(pingpong_list),
+            '-c', 'copy',
+            str(temp_pingpong)
+        ]
+        result = subprocess.run(pingpong_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"✗ Error creating ping-pong video: {result.stderr}")
+            sys.exit(1)
+
+        print("    ✓ Boomerang effect created")
+
+        # Now loop the ping-pong video for 90 seconds
+        print("  [2/7] Looping boomerang to 90 seconds...")
         loop_cmd = [
             'ffmpeg', '-y',
             '-stream_loop', '-1',  # Loop indefinitely
-            '-i', str(video_path),
+            '-i', str(temp_pingpong),
             '-t', '90',  # Cut to exactly 90 seconds
             '-c:v', 'libx264',
             '-preset', 'fast',
@@ -1038,15 +1153,15 @@ PREMISE: [Korean translation]"""
 
         result = subprocess.run(loop_cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print(f"✗ Error creating 90-second video: {result.stderr}")
+            print(f"✗ Error creating 90-second looped boomerang: {result.stderr}")
             sys.exit(1)
-        print("    ✓ 90-second video segment created")
+        print("    ✓ 90-second boomerang video created")
 
-        # Step 2: Create video segments from still images (if remaining time > 0)
+        # Step 3: Create video segments from still images (if remaining time > 0)
         image_segments = []
         if remaining_duration > 0 and image_paths:
             duration_per_image = remaining_duration / len(image_paths)
-            print(f"  [2/6] Creating {len(image_paths)} still image segments ({duration_per_image:.1f}s each)...")
+            print(f"  [3/7] Creating {len(image_paths)} still image segments ({duration_per_image:.1f}s each)...")
 
             for i, img_path in enumerate(image_paths):
                 img_segment = self.working_dir / f"temp_image_{i}.mp4"
@@ -1075,12 +1190,12 @@ PREMISE: [Korean translation]"""
                 else:
                     print(f"    ✓ Created segment {i+1}/{len(image_paths)}")
 
-        # Step 3: Concatenate all segments (90s video + image segments)
+        # Step 4: Concatenate all segments (90s video + image segments)
         concat_list = self.working_dir / "concat_list.txt"
         temp_concatenated = self.working_dir / "temp_concatenated.mp4"
 
         if image_segments:
-            print(f"  [3/6] Concatenating video + {len(image_segments)} image segments...")
+            print(f"  [4/7] Concatenating video + {len(image_segments)} image segments...")
 
             # Create concat file list
             with open(concat_list, 'w', encoding='utf-8') as f:
@@ -1106,11 +1221,11 @@ PREMISE: [Korean translation]"""
         else:
             # No images to add, just use the 90-second video
             temp_concatenated = temp_video_90s
-            print("  [3/6] No image segments to concatenate, using 90s video only")
+            print("  [4/7] No image segments to concatenate, using 90s video only")
 
-        # Step 4: Add subtitles
+        # Step 5: Add subtitles
         temp_with_subs = self.working_dir / "temp_with_subs.mp4"
-        print("  [4/6] Burning in subtitles...")
+        print("  [5/7] Burning in subtitles...")
 
         # Escape subtitle path for FFmpeg filter - properly escape for Windows
         subtitle_path_escaped = str(subtitle_path).replace('\\', '/').replace(':', '\\\\:')
@@ -1136,8 +1251,8 @@ PREMISE: [Korean translation]"""
         else:
             print("    ✓ Subtitles burned in")
 
-        # Step 5: Add voiceover audio and export final video
-        print("  [5/6] Adding voiceover and exporting final video...")
+        # Step 6: Add voiceover audio and export final video
+        print("  [6/7] Adding voiceover and exporting final video...")
 
         if voiceover_path:
             final_cmd = [
@@ -1168,9 +1283,9 @@ PREMISE: [Korean translation]"""
 
         print("    ✓ Final video exported")
 
-        # Step 6: Clean up temp files
-        print("  [6/6] Cleaning up temporary files...")
-        temp_files = [temp_video_90s, temp_concatenated, temp_with_subs, concat_list] + image_segments
+        # Step 7: Clean up temp files
+        print("  [7/7] Cleaning up temporary files...")
+        temp_files = [temp_forward, temp_reverse, temp_pingpong, pingpong_list, temp_video_90s, temp_concatenated, temp_with_subs, concat_list] + image_segments
         for temp_file in temp_files:
             if temp_file.exists() and temp_file != output_path:
                 temp_file.unlink()

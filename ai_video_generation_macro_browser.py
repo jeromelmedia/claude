@@ -138,7 +138,8 @@ class VideoGenerationMacroBrowser:
             input()
 
     def send_prompt_and_wait(self, prompt: str, wait_time: int = 60,
-                             stabilization_wait: int = 20, max_stability_checks: int = 15) -> str:
+                             stabilization_wait: int = 20, max_stability_checks: int = 15,
+                             stability_threshold: int = 5, stability_check_interval: int = 5) -> str:
         """
         Send a prompt to Claude and wait for response
 
@@ -147,6 +148,8 @@ class VideoGenerationMacroBrowser:
             wait_time: Max time to wait for generation to complete
             stabilization_wait: Seconds to wait after Stop button disappears (default 20)
             max_stability_checks: Max number of stability checks (default 15)
+            stability_threshold: Number of consecutive stable checks required (default 5)
+            stability_check_interval: Seconds to wait between stability checks (default 5)
         """
         try:
             # Retry logic for DOM issues
@@ -266,30 +269,59 @@ class VideoGenerationMacroBrowser:
             print("  Stabilizing...")
             time.sleep(stabilization_wait)
 
-            # Check if text is still changing (wait until stable)
+            # Check if the LATEST MESSAGE is still changing (wait until stable)
             stable_count = 0
-            last_text_length = 0
+            last_message_length = 0
 
             for stability_check in range(max_stability_checks):
                 try:
-                    # Get current text length
-                    current_js = "return document.body.innerText.length;"
-                    current_length = self.driver.execute_script(current_js)
+                    # Get the latest message text length (not entire page)
+                    latest_message_js = """
+                    var selectors = [
+                        'div[data-test-render-count]',
+                        'div[class*="Message"]',
+                        'div[class*="message"]',
+                        'div[role="article"]'
+                    ];
 
-                    if current_length == last_text_length:
+                    var latestMsg = null;
+                    var maxLength = 0;
+
+                    for (var i = 0; i < selectors.length; i++) {
+                        var elements = document.querySelectorAll(selectors[i]);
+                        if (elements.length > 0) {
+                            var lastElement = elements[elements.length - 1];
+                            var text = lastElement.innerText || lastElement.textContent || '';
+                            if (text.length > maxLength) {
+                                maxLength = text.length;
+                                latestMsg = text;
+                            }
+                        }
+                    }
+
+                    return latestMsg ? latestMsg.length : 0;
+                    """
+                    current_message_length = self.driver.execute_script(latest_message_js)
+
+                    if current_message_length == last_message_length and current_message_length > 0:
                         stable_count += 1
-                        if stable_count >= 3:
+                        if stable_count >= stability_threshold:
+                            print(f"  Response stable ({current_message_length} chars, {stable_count} checks)")
                             break
                     else:
+                        if current_message_length > last_message_length:
+                            print(f"  Still generating... ({current_message_length} chars)")
                         stable_count = 0
 
-                    last_text_length = current_length
-                    time.sleep(3)  # Increased from 2 to 3 seconds between checks
-                except:
-                    time.sleep(3)
+                    last_message_length = current_message_length
+                    time.sleep(stability_check_interval)
+                except Exception as e:
+                    print(f"  Stability check error: {e}")
+                    time.sleep(5)
 
-            # Final wait for DOM to settle
-            time.sleep(3)
+            # Final wait for DOM to settle and any final rendering
+            print("  Final stabilization...")
+            time.sleep(8)  # Increased from 5 to 8 seconds for extra safety
 
             # Use JavaScript to extract response - MUCH more reliable!
             response_text = ""
@@ -316,7 +348,16 @@ class VideoGenerationMacroBrowser:
                 for (var i = 0; i < selectors.length; i++) {
                     var elements = document.querySelectorAll(selectors[i]);
                     for (var j = 0; j < elements.length; j++) {
-                        var text = elements[j].innerText || elements[j].textContent;
+                        // Scroll element into view to ensure all content is loaded (for lazy-loading)
+                        try {
+                            elements[j].scrollIntoView({behavior: 'instant', block: 'nearest'});
+                        } catch (e) {}
+
+                        // Get text using multiple methods and pick the longest
+                        var text1 = elements[j].innerText || '';
+                        var text2 = elements[j].textContent || '';
+                        var text = text1.length > text2.length ? text1 : text2;
+
                         if (text && text.length > 20) {
                             allMessages.push({
                                 text: text.trim(),
@@ -328,14 +369,15 @@ class VideoGenerationMacroBrowser:
                     }
                 }
 
-                // Return the last non-empty message
+                // Return the LONGEST message (likely the full response)
                 if (allMessages.length > 0) {
-                    // Sort by appearance order and get last
-                    var lastMsg = allMessages[allMessages.length - 1];
+                    // Sort by length descending to get longest message
+                    allMessages.sort(function(a, b) { return b.length - a.length; });
+                    var longestMsg = allMessages[0];
                     return JSON.stringify({
                         success: true,
-                        text: lastMsg.text,
-                        method: lastMsg.selector,
+                        text: longestMsg.text,
+                        method: longestMsg.selector,
                         count: allMessages.length
                     });
                 }
@@ -361,7 +403,8 @@ class VideoGenerationMacroBrowser:
                     for div in reversed(all_divs):
                         try:
                             text = div.text.strip()
-                            if text and len(text) > 20 and len(text) < 5000:
+                            # REMOVED 5000 char limit - scripts can be 40,000+ characters!
+                            if text and len(text) > 20:
                                 # Don't include if it contains the prompt
                                 if prompt[:30] not in text:
                                     response_text = text
@@ -481,7 +524,10 @@ class VideoGenerationMacroBrowser:
             'results',
             'Show working file',
             'TEXT',
-            'relevant sections'
+            'relevant sections',
+            'Reading the',
+            'Reading another',
+            'Now I understand'
         ]
 
         # Collect candidate lines (not process text)
@@ -499,6 +545,10 @@ class VideoGenerationMacroBrowser:
                 if line_stripped.startswith(pattern):
                     is_process = True
                     break
+
+            # Skip hashtag lines (they shouldn't be extracted as content)
+            if line_stripped.startswith('#') or (line_stripped.count('#') > 2):
+                continue
 
             if not is_process and len(line_stripped) > 15:
                 candidates.append(line_stripped)
@@ -534,7 +584,10 @@ class VideoGenerationMacroBrowser:
         print("\n=== STEP 1: Generating Video Title ===")
 
         while True:
-            prompt = """Generate a YouTube video title in English.
+            # Use character name if available, otherwise fall back to "a doctor"
+            host_identity = f"The host is {self.character_name}" if self.character_name else "The host is a doctor"
+
+            prompt = f"""Generate a YouTube video title in PURE ENGLISH.
 
 Use the "korean video titles.txt" file in this project as reference for:
 - Topics to cover (HEALTH and LIFESTYLE for seniors 60+, NO FINANCE)
@@ -542,13 +595,22 @@ Use the "korean video titles.txt" file in this project as reference for:
 - Tone and urgency level
 - Use of numbers and specific details
 
-The host is a DOCTOR, so focus on health and lifestyle topics only.
+{host_identity}, so focus on health and lifestyle topics only.
 
-Create ONE title in English following that style.
+LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH - NO Korean words or phrases
+- Use ONLY English vocabulary
+
+Create ONE title in pure English following that style.
 
 JUST OUTPUT THE TITLE. No explanations."""
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=90,
+                stabilization_wait=25,
+                max_stability_checks=20
+            )
 
             # Parse the response to extract JUST the title (not Claude's thinking/searching)
             title = self.extract_generated_content(response)
@@ -574,7 +636,12 @@ User wants this change: {modification}
 
 Generate the modified title. JUST OUTPUT THE NEW TITLE."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=90,
+                    stabilization_wait=25,
+                    max_stability_checks=20
+                )
                 title = self.extract_generated_content(response)
                 print(f"\nModified Title:\n{title}\n")
 
@@ -604,7 +671,9 @@ Use the "korean video descriptions.txt" file in this project as reference for:
 
 REQUIREMENTS:
 - Write a LONG, DETAILED description (aim for 500-1000+ words)
-- Maximum 5000 characters
+- CRITICAL: You MUST keep the description under 5000 characters total
+- Write a complete, compelling description that naturally fits within this limit
+- DO NOT exceed 5000 characters - plan your content to fit within this constraint
 - Include multiple paragraphs
 - Explain what viewers will learn
 - Build curiosity and urgency
@@ -612,14 +681,30 @@ REQUIREMENTS:
 - Use emotional hooks
 - End with strong call to action
 
-Write in English following that style.
+LANGUAGE REQUIREMENTS - CRITICAL:
+- Write ENTIRELY in ENGLISH language only
+- NO Korean words, phrases, or greetings
+- Use ONLY English vocabulary throughout
+- NO fabricated quotes or testimonials
 
-JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
+Write in pure English following that style.
 
-            response = self.send_prompt_and_wait(prompt, wait_time=120)  # Longer wait for detailed descriptions
-            description = self.extract_generated_content(response)
+JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE, but stay under 5000 characters."""
 
-            print(f"\nGenerated Description:\n{description}\n")
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=180,  # 3 minutes for long descriptions
+                stabilization_wait=30,  # Extra long initial wait
+                max_stability_checks=30  # More checks to ensure completion
+            )
+            description = self.extract_generated_content(response, extract_all=True)  # Get full multi-paragraph description
+
+            # Show character count
+            char_count = len(description)
+            print(f"\nGenerated Description ({char_count} characters):\n{description}\n")
+
+            if char_count > 5000:
+                print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
 
@@ -635,11 +720,20 @@ JUST OUTPUT THE DESCRIPTION. Make it DETAILED and COMPREHENSIVE."""
 
 User wants this change: {modification}
 
-Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
+Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST OUTPUT THE NEW DESCRIPTION."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
-                description = self.extract_generated_content(response)
-                print(f"\nModified Description:\n{description}\n")
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=180,
+                    stabilization_wait=30,
+                    max_stability_checks=30
+                )
+                description = self.extract_generated_content(response, extract_all=True)  # Get full description
+                char_count = len(description)
+                print(f"\nModified Description ({char_count} characters):\n{description}\n")
+
+                if char_count > 5000:
+                    print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
                     print("\nDescription approved\n")
@@ -656,16 +750,29 @@ Generate the modified description. JUST OUTPUT THE NEW DESCRIPTION."""
         print("\n=== STEP 3: Generating Video Premise ===")
 
         while True:
+            # Use character name if available
+            expert_intro = f"Introduce {self.character_name}" if self.character_name else "Introduce the expert/authority"
+
             prompt = f"""Generate a video premise based on this title: "{title}"
 
-Write 2-3 sentences in English that:
-- Introduce the expert/authority with years of experience
+Write 2-3 sentences in PURE ENGLISH that:
+- {expert_intro} with years of experience
 - State the main discovery/solution with specific details
 - Preview the key benefits viewers will learn
 
-JUST OUTPUT THE PREMISE."""
+LANGUAGE REQUIREMENTS:
+- Write ENTIRELY in ENGLISH - NO Korean words or phrases
+- NO fabricated quotes or testimonials
+- Describe the premise directly without quotation marks
 
-            response = self.send_prompt_and_wait(prompt, wait_time=60)
+JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
+
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=90,
+                stabilization_wait=25,
+                max_stability_checks=20
+            )
             premise = self.extract_generated_content(response)
 
             print(f"\nGenerated Premise:\n{premise}\n")
@@ -686,7 +793,12 @@ User wants this change: {modification}
 
 Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=60)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=90,
+                    stabilization_wait=25,
+                    max_stability_checks=20
+                )
                 premise = self.extract_generated_content(response)
                 print(f"\nModified Premise:\n{premise}\n")
 
@@ -704,6 +816,9 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
         """Generate one segment of the script using Claude.ai Project"""
         print(f"  Generating segment {segment_num}/{total_segments}...")
 
+        # Use character name if available
+        doctor_identity = f"The doctor is {self.character_name}, from KOREA" if self.character_name else "The doctor is from KOREA"
+
         prompt = f"""Write script segment {segment_num} of {total_segments} for this video.
 
 Title: "{title}"
@@ -714,7 +829,7 @@ Target: {6500 // total_segments} words for this segment
 SEGMENT FOCUS:
 {self._get_segment_focus(segment_num, total_segments)}
 
-WRITING STYLE - Match the Korean .txt script files in this project:
+WRITING STYLE - Reference the Korean .txt script files in this project:
 - Use their dramatic storytelling style
 - Copy their structure (opening hooks, patient stories, expert credibility, solutions, timelines)
 - Match their tone for seniors (60+)
@@ -723,7 +838,7 @@ WRITING STYLE - Match the Korean .txt script files in this project:
 - Scientific explanations in simple terms
 
 CRITICAL - KOREAN CONTEXT ONLY:
-- The doctor is from KOREA (not America)
+- {doctor_identity} (not America)
 - ALL patient stories must be Korean patients with Korean names (Kim, Park, Lee, Choi, etc.)
 - ALL locations must be in Korea (Seoul, Busan, hospitals in Korea, etc.)
 - Use Korean cultural context and references
@@ -731,14 +846,27 @@ CRITICAL - KOREAN CONTEXT ONLY:
 - NO American names, cities, or locations
 - The doctor practices in Korea and treats Korean patients
 
-JUST WRITE THE SCRIPT SEGMENT IN ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
+LANGUAGE REQUIREMENTS - CRITICAL:
+- Write ENTIRELY in ENGLISH language only
+- DO NOT include ANY Korean words, phrases, or greetings
+- DO NOT mix Korean and English (no "여러분", "안녕하세요", etc.)
+- Use ONLY English vocabulary throughout the entire script
+- Korean context (names, places) is fine, but ALL text must be in English
+
+NO FABRICATED CONTENT:
+- DO NOT invent fake quotes or testimonials
+- DO NOT create fabricated patient dialogue
+- Patient STORIES are okay, but NO direct quotes
+- Describe what happened without using quotation marks
+
+JUST WRITE THE SCRIPT SEGMENT IN PURE ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
         # EXTRA LONG waits for script segments (they're 1625+ words)
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=240,  # 4 minutes max wait
-            stabilization_wait=30,  # 30 seconds initial stabilization (up from 20)
-            max_stability_checks=20  # 20 checks = up to 60 more seconds (up from 15)
+            wait_time=300,  # 5 minutes max wait (up from 4)
+            stabilization_wait=45,  # 45 seconds initial stabilization (up from 30)
+            max_stability_checks=30  # 30 checks = up to 150 more seconds (up from 20)
         )
         segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
 
@@ -795,7 +923,12 @@ Current script:
 
 Generate the ADDITIONAL content only:"""
 
-            additional = self.send_prompt_and_wait(additional_prompt, wait_time=120)
+            additional = self.send_prompt_and_wait(
+                additional_prompt,
+                wait_time=240,
+                stabilization_wait=35,
+                max_stability_checks=30
+            )
             full_script += "\n\n" + additional
             total_words = len(full_script.split())
             print(f"Updated word count: {total_words}")
@@ -825,8 +958,29 @@ Generate the ADDITIONAL content only:"""
 
         # Show preview and get approval
         while True:
-            print("\nScript Preview (first 500 characters):")
-            print(full_script[:500] + "...\n")
+            print("\nScript Preview (start and end):")
+
+            # Split into sentences and show first + last
+            import re
+            sentences = re.split(r'(?<=[.!?])\s+', full_script)
+            sentences = [s.strip() for s in sentences if s.strip()]
+
+            # Get first 3 and last 3 sentences
+            num_preview_sentences = 3
+            if len(sentences) > num_preview_sentences * 2:
+                first_sentences = ' '.join(sentences[:num_preview_sentences])
+                last_sentences = ' '.join(sentences[-num_preview_sentences:])
+                print(f"{first_sentences}")
+                print("\n[... middle of script ...]\n")
+                print(f"{last_sentences}\n")
+            else:
+                # If script is short, just show it all
+                print(full_script + "\n")
+
+            # Show last 20 words for validation
+            words = full_script.strip().split()
+            last_20_words = ' '.join(words[-20:])
+            print(f"Last 20 words: ...{last_20_words}\n")
 
             choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
 
@@ -851,7 +1005,12 @@ Generate the modified FULL script incorporating this change. Keep it 6000-7000 w
 
 JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
 
-                response = self.send_prompt_and_wait(modify_prompt, wait_time=180)
+                response = self.send_prompt_and_wait(
+                    modify_prompt,
+                    wait_time=300,
+                    stabilization_wait=40,
+                    max_stability_checks=35
+                )
                 full_script = response.strip()
                 total_words = len(full_script.split())
 
@@ -881,8 +1040,91 @@ Translate to natural Korean for seniors (60+):
 
 JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
-        response = self.send_prompt_and_wait(prompt, wait_time=90)
+        # Increase wait times based on content type
+        if content_type == "description":
+            wait_time = 180
+            stabilization = 30
+            checks = 30
+        else:
+            wait_time = 120
+            stabilization = 25
+            checks = 25
+
+        response = self.send_prompt_and_wait(
+            prompt,
+            wait_time=wait_time,
+            stabilization_wait=stabilization,
+            max_stability_checks=checks
+        )
         return response.strip()
+
+    def validate_script_endings(self, english_script: str, korean_script: str) -> bool:
+        """Validate that Korean translation is complete by checking if endings match"""
+        print("\n=== Validating Translation Completeness ===")
+
+        # Get last sentence from English script
+        import re
+        english_sentences = re.split(r'(?<=[.!?])\s+', english_script.strip())
+        english_sentences = [s.strip() for s in english_sentences if s.strip()]
+
+        if not english_sentences:
+            print("⚠ WARNING: Could not parse English script into sentences")
+            return False
+
+        last_english_sentence = english_sentences[-1]
+
+        # Get last ~20 words from English script
+        english_words = english_script.strip().split()
+        last_20_english = ' '.join(english_words[-20:])
+
+        # Get last ~20 words from Korean script
+        korean_words = korean_script.strip().split()
+        last_20_korean = ' '.join(korean_words[-20:])
+
+        print(f"\nLast 20 words of English script:")
+        print(f"  ...{last_20_english}")
+        print(f"\nLast 20 words of Korean script:")
+        print(f"  ...{last_20_korean}")
+
+        # Now translate just the last English sentence to verify
+        print(f"\nVerifying translation of final sentence...")
+        print(f"Final English sentence: {last_english_sentence}")
+
+        validation_prompt = f"""Translate ONLY this sentence to Korean:
+
+{last_english_sentence}
+
+JUST OUTPUT THE KOREAN TRANSLATION. No explanations."""
+
+        response = self.send_prompt_and_wait(
+            validation_prompt,
+            wait_time=60,
+            stabilization_wait=15,
+            max_stability_checks=10
+        )
+
+        expected_korean_ending = response.strip()
+        print(f"\nExpected Korean ending: {expected_korean_ending}")
+
+        # Check if Korean script ends with something similar to the expected ending
+        # We'll check if the last ~100 characters of Korean script contain the expected ending
+        korean_tail = korean_script.strip()[-200:].strip()
+
+        # Simple check: does the Korean script end with similar content?
+        # We can't do exact match due to minor formatting differences
+        similarity_found = expected_korean_ending[:30] in korean_tail if len(expected_korean_ending) > 30 else expected_korean_ending[:15] in korean_tail
+
+        if similarity_found:
+            print("✓ Translation appears complete - endings match!\n")
+            return True
+        else:
+            print("⚠ WARNING: Translation ending doesn't match expected translation!")
+            print("This might indicate the translation was truncated.\n")
+            print(f"Looking for: {expected_korean_ending[:50]}...")
+            print(f"Found at end: {korean_tail[-100:]}\n")
+
+            choice = input("Continue anyway? [y/n]: ").lower()
+            return choice == 'y'
 
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
         """Translate full script to Korean using uploaded file"""
@@ -890,25 +1132,39 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
         prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
 
-IMPORTANT REQUIREMENTS:
-- Translate the COMPLETE script from beginning to end
+CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
+- Read the ENTIRE file from beginning to end
+- Translate EVERY sentence and paragraph
+- Do NOT stop early or truncate
+- The script should be approximately 6000-7000 words in English
+- Your Korean translation should be similarly long and complete
 - Maintain the storytelling style and dramatic tone
 - Keep all numbers, ages, and specific details accurate
 - Preserve the paragraph structure and formatting
 - Use natural, conversational Korean for seniors (60+)
 - Keep the same emotional impact and urgency
 
-JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
+JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL script."""
 
         response = self.send_prompt_and_wait(
             prompt,
-            wait_time=300,  # 5 minutes for full script translation
-            stabilization_wait=40,  # Extra long wait for large translation
-            max_stability_checks=25  # More checks for translation
+            wait_time=600,  # 10 minutes for full script translation
+            stabilization_wait=90,  # Much longer initial wait for large translation
+            max_stability_checks=60,  # More checks for translation to ensure complete
+            stability_threshold=12,  # Require 12 consecutive stable checks (not just 5)
+            stability_check_interval=10  # Wait 10 seconds between checks (not just 5)
         )
 
         korean_script = self.extract_generated_content(response, extract_all=True)
-        print(f"Script translated ({len(korean_script)} chars)\n")
+
+        # Show character count and word estimate
+        char_count = len(korean_script)
+        word_estimate = char_count // 2  # Korean characters are roughly 2 chars per word
+        print(f"Script translated: {char_count} chars (~{word_estimate} Korean chars)\n")
+
+        # Warning if translation seems too short
+        if char_count < 15000:
+            print(f"⚠ WARNING: Translation seems short ({char_count} chars). Expected ~20,000+ for full script.\n")
 
         return korean_script
 
@@ -1228,19 +1484,63 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         print(f"Duration: {voiceover_duration:.2f}s")
         print(f"Images: {len(image_paths)}\n")
 
-        working_dir = Path(output_path).parent
-        temp_looped = working_dir / "temp_looped.mp4"
-        temp_concat_list = working_dir / "concat_list.txt"
-        temp_concatenated = working_dir / "temp_concatenated.mp4"
-        temp_with_subs = working_dir / "temp_with_subs.mp4"
+        # IMPORTANT: Resolve all paths to absolute before os.chdir() to avoid path duplication
+        working_dir = Path(output_path).parent.resolve()
+        temp_looped = (working_dir / "temp_looped.mp4").resolve()
+        temp_concat_list = (working_dir / "concat_list.txt").resolve()
+        temp_concatenated = (working_dir / "temp_concatenated.mp4").resolve()
+        temp_with_subs = (working_dir / "temp_with_subs.mp4").resolve()
 
         try:
-            # Step 1: Create 90-second looped video
-            print("[1/6] Looping video to 90s...")
+            # Step 1: Create boomerang (ping-pong) effect for the talking person video
+            temp_forward = (working_dir / "temp_forward.mp4").resolve()
+            temp_reverse = (working_dir / "temp_reverse.mp4").resolve()
+            temp_pingpong = (working_dir / "temp_pingpong.mp4").resolve()
+            pingpong_list = (working_dir / "pingpong_list.txt").resolve()
+
+            print("[1/7] Creating boomerang effect...")
+
+            # Create forward version (no audio)
+            forward_cmd = [
+                'ffmpeg', '-y',
+                '-i', self.selected_character_video,
+                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                '-an',  # No audio
+                str(temp_forward)
+            ]
+            subprocess.run(forward_cmd, capture_output=True, check=True)
+
+            # Create reverse version
+            reverse_cmd = [
+                'ffmpeg', '-y',
+                '-i', self.selected_character_video,
+                '-vf', 'reverse',
+                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                '-an',  # No audio
+                str(temp_reverse)
+            ]
+            subprocess.run(reverse_cmd, capture_output=True, check=True)
+
+            # Concatenate forward + reverse to create ping-pong effect
+            with open(pingpong_list, 'w', encoding='utf-8') as f:
+                f.write(f"file '{temp_forward}'\n")
+                f.write(f"file '{temp_reverse}'\n")
+
+            pingpong_cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat', '-safe', '0',
+                '-i', str(pingpong_list),
+                '-c', 'copy',
+                str(temp_pingpong)
+            ]
+            subprocess.run(pingpong_cmd, capture_output=True, check=True)
+
+            # Step 2: Loop the boomerang video to 90 seconds
+            print("[2/7] Looping boomerang to 90s...")
             loop_cmd = [
                 'ffmpeg', '-y',
                 '-stream_loop', '-1',  # Loop indefinitely
-                '-i', video_path,
+                '-i', str(temp_pingpong),
                 '-t', '90',  # 90 seconds
                 '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
                 '-an',  # No audio
@@ -1248,8 +1548,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             ]
             subprocess.run(loop_cmd, capture_output=True, check=True)
 
-            # Step 2: Create video segments from images
-            print(f"[2/6] Creating image segments...")
+            # Step 3: Create video segments from images
+            print(f"[3/7] Creating image segments...")
 
             remaining_duration = voiceover_duration - 90
             if remaining_duration <= 0:
@@ -1259,7 +1559,7 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
                 image_segments = []
                 for i, img_path in enumerate(image_paths, 1):
-                    temp_img_video = working_dir / f"temp_image_{i}.mp4"
+                    temp_img_video = (working_dir / f"temp_image_{i}.mp4").resolve()
 
                     img_cmd = [
                         'ffmpeg', '-y',
@@ -1275,14 +1575,14 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
                     subprocess.run(img_cmd, capture_output=True, check=True)
                     image_segments.append(temp_img_video)
 
-            # Step 3: Concatenate all segments
-            print("[3/6] Concatenating segments...")
+            # Step 4: Concatenate all segments
+            print("[4/7] Concatenating segments...")
 
             # Create concat list
             with open(temp_concat_list, 'w', encoding='utf-8') as f:
-                f.write(f"file '{temp_looped.absolute()}'\n")
+                f.write(f"file '{temp_looped}'\n")
                 for seg in image_segments:
-                    f.write(f"file '{seg.absolute()}'\n")
+                    f.write(f"file '{seg}'\n")
 
             concat_cmd = [
                 'ffmpeg', '-y',
@@ -1294,27 +1594,40 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             ]
             subprocess.run(concat_cmd, capture_output=True, check=True)
 
-            # Step 4: Add subtitles
-            print("[4/6] Burning subtitles...")
+            # Step 5: Add subtitles
+            print("[5/7] Burning subtitles...")
 
-            # Windows path fix for subtitles - properly escape for FFmpeg filter syntax
-            subtitle_path_fixed = str(Path(subtitle_path).absolute()).replace('\\', '/')
-            subtitle_path_fixed = subtitle_path_fixed.replace(':', '\\\\:')
-            # Escape spaces for FFmpeg filter syntax on Windows
-            subtitle_path_fixed = subtitle_path_fixed.replace(' ', '\\\\ ')
+            # Use a different approach: copy subtitles to working dir with simple name to avoid path escaping issues
+            simple_subtitle_path = (working_dir / "subs.srt").resolve()
+            import shutil
+            shutil.copy(subtitle_path, simple_subtitle_path)
 
-            subtitle_cmd = [
-                'ffmpeg', '-y',
-                '-i', str(temp_concatenated),
-                '-vf', f"subtitles='{subtitle_path_fixed}':force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'",
-                '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
-                '-c:a', 'copy',
-                str(temp_with_subs)
-            ]
-            subprocess.run(subtitle_cmd, capture_output=True, check=True)
+            # For FFmpeg filter syntax, we need to escape special characters
+            # Using a simple filename avoids Windows path escaping issues entirely
+            subtitle_filter = f"subtitles={simple_subtitle_path.name}:force_style='FontName=Arial,FontSize=24,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H80000000,Outline=2,Shadow=1,MarginV=40'"
 
-            # Step 5: Add voiceover
-            print("[5/6] Adding voiceover...")
+            # Run FFmpeg from the working directory so it can find the subtitle file
+            import os
+            original_cwd = os.getcwd()
+            os.chdir(working_dir)
+
+            try:
+                subtitle_cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(temp_concatenated),
+                    '-vf', subtitle_filter,
+                    '-c:v', 'libx264', '-crf', '23', '-preset', 'fast',
+                    '-c:a', 'copy',
+                    str(temp_with_subs)
+                ]
+                subprocess.run(subtitle_cmd, capture_output=True, check=True)
+            finally:
+                os.chdir(original_cwd)
+                # Clean up temporary subtitle copy
+                simple_subtitle_path.unlink(missing_ok=True)
+
+            # Step 6: Add voiceover
+            print("[6/7] Adding voiceover...")
 
             final_cmd = [
                 'ffmpeg', '-y',
@@ -1329,8 +1642,12 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             ]
             subprocess.run(final_cmd, capture_output=True, check=True)
 
-            # Step 6: Cleanup
-            print("[6/6] Cleaning up...")
+            # Step 7: Cleanup
+            print("[7/7] Cleaning up...")
+            temp_forward.unlink(missing_ok=True)
+            temp_reverse.unlink(missing_ok=True)
+            temp_pingpong.unlink(missing_ok=True)
+            pingpong_list.unlink(missing_ok=True)
             temp_looped.unlink(missing_ok=True)
             temp_concat_list.unlink(missing_ok=True)
             temp_concatenated.unlink(missing_ok=True)
@@ -1380,8 +1697,8 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
         # Remove leading/trailing dots and spaces
         filename = filename.strip('. ')
 
-        # Truncate to reasonable length
-        max_length = 100
+        # Truncate to reasonable length (reduced from 100 to 60 to accommodate long base paths)
+        max_length = 60
         if len(filename) > max_length:
             filename = filename[:max_length].strip()
 
@@ -1421,6 +1738,30 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
             english_script = self.generate_full_script_browser(english_title, english_premise)
 
+            # Validate English script was fully captured
+            print("\n=== Validating English Script Capture ===")
+            script_words = english_script.strip().split()
+            script_chars = len(english_script)
+            last_30_words = ' '.join(script_words[-30:])
+
+            print(f"Script stats:")
+            print(f"  Total words: {len(script_words)}")
+            print(f"  Total characters: {script_chars}")
+            print(f"  Last 30 words: ...{last_30_words}")
+
+            # Verify it's not truncated by checking it ends with a sentence-ending punctuation
+            if english_script.strip()[-1] not in '.!?':
+                print("\n⚠ WARNING: Script doesn't end with sentence-ending punctuation!")
+                print("This might indicate truncation.")
+                choice = input("Continue anyway? [y/n]: ").lower()
+                if choice != 'y':
+                    print("Script rejected. Please regenerate.")
+                    if self.driver:
+                        self.driver.quit()
+                    return
+            else:
+                print("✓ Script appears complete (ends with proper punctuation)\n")
+
             # === CREATE OUTPUT FOLDER ===
             folder_name = self.sanitize_filename(english_title)
             self.working_dir = self.base_output_dir / folder_name
@@ -1428,14 +1769,21 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
 
             print(f"\nOutput folder: {self.working_dir}")
 
-            # Save English content
+            # Save English title
+            title_path = self.working_dir / "video_title_english.txt"
+            with open(title_path, 'w', encoding='utf-8') as f:
+                f.write(english_title)
+
+            # Save English description
+            description_path = self.working_dir / "video_description_english.txt"
+            with open(description_path, 'w', encoding='utf-8') as f:
+                f.write(english_description)
+
+            # Save English script (ONLY the script, no title/description)
             script_path = self.working_dir / "video_script_english.txt"
             with open(script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {english_title}\n\n")
-                f.write(f"Description: {english_description}\n\n")
-                f.write(f"Premise: {english_premise}\n\n")
-                f.write(f"Script:\n{english_script}")
-            print(f"English script saved\n")
+                f.write(english_script)
+            print(f"English files saved\n")
 
             # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
             print("="*50)
@@ -1462,6 +1810,15 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             # Translate full script using uploaded file (not chunks)
             korean_script = self.translate_script_to_korean_browser(str(script_path))
 
+            # Validate translation completeness by comparing endings
+            validation_passed = self.validate_script_endings(english_script, korean_script)
+
+            if not validation_passed:
+                print("Validation failed. Exiting.")
+                if self.driver:
+                    self.driver.quit()
+                return
+
             # Save Korean title as separate file
             korean_title_path = self.working_dir / "video_title_korean.txt"
             with open(korean_title_path, 'w', encoding='utf-8') as f:
@@ -1472,12 +1829,10 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations."""
             with open(korean_description_path, 'w', encoding='utf-8') as f:
                 f.write(korean_description)
 
-            # Save Korean content (title, description, and script combined)
+            # Save Korean script (ONLY the script, no title/description)
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
-                f.write(f"Title: {korean_title}\n\n")
-                f.write(f"Description: {korean_description}\n\n")
-                f.write(f"Script:\n{korean_script}")
+                f.write(korean_script)
             print(f"Korean files saved\n")
 
             # === CLOSE BROWSER ===
