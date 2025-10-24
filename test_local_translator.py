@@ -7,7 +7,7 @@ from local_translator import LocalTranslator
 
 def main():
     print("=" * 60)
-    print("TESTING LOCAL TRANSLATOR (ARGOS TRANSLATE)")
+    print("TESTING LOCAL TRANSLATOR (OPUS-MT)")
     print("=" * 60)
 
     # Initialize translator
