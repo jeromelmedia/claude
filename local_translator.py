@@ -12,7 +12,7 @@ class LocalTranslator:
 
     def __init__(self):
         """Initialize the translator and load the Opus-MT model"""
-        self.model_name = "Helsinki-NLP/opus-mt-en-ko"
+        self.model_name = "Helsinki-NLP/opus-mt-tc-big-en-ko"
         self.tokenizer = None
         self.model = None
 
