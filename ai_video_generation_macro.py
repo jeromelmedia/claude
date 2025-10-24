@@ -24,6 +24,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 import pyautogui
+from local_translator import LocalTranslator
 
 # Import project knowledge loader
 try:
@@ -86,6 +87,9 @@ class VideoGenerationMacro:
 
         print(f"\nUsing Claude model: {self.model}")
         print(f"Project ID: {self.project_id}")
+
+        # Initialize local translator for offline translation
+        self.translator = LocalTranslator()
 
         # Base output directory - subfolders will be created per video
         self.base_output_dir = Path("./output")
@@ -157,41 +161,24 @@ class VideoGenerationMacro:
             sys.exit(1)
 
     def translate_to_korean_simple(self, text: str, label: str = "text") -> str:
-        """Translate a short text to Korean with rate limit retry.
+        """Translate a short text to Korean using offline NLLB-200 model.
 
-        NOTE: This method does NOT use project files to save tokens.
-        Translation doesn't need the 83K+ chars of context.
+        Uses local translation for completely offline operation.
         """
-        print(f"\nTranslating {label} to Korean...")
-        print("  (Using lightweight API call without project files)")
+        print(f"\nTranslating {label} to Korean (offline)...")
 
-        max_retries = 5
-        base_delay = 2
+        # Initialize translator if needed
+        self.translator.initialize()
 
-        for attempt in range(max_retries):
-            try:
-                message = self.claude_client.messages.create(
-                    model=self.model,
-                    max_tokens=1000,
-                    # NOTE: No system= parameter here = no project files sent
-                    # This saves ~20,000 tokens per translation!
-                    messages=[{
-                        "role": "user",
-                        "content": f"Translate the following {label} to Korean. Maintain the tone and style:\n\n{text}"
-                    }]
-                )
+        # Translate using local model
+        translation = self.translator.translate(text)
 
-                translation = message.content[0].text.strip()
-                print(f"Korean {label}: {translation}")
-                return translation
-
-            except Exception as e:
-                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)  # Exponential backoff
-                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry {attempt + 1}/{max_retries}...")
-                    time.sleep(delay)
-                else:
-                    raise  # Re-raise if not a rate limit error or max retries exceeded
+        if translation:
+            print(f"Korean {label}: {translation}")
+            return translation
+        else:
+            print(f"✗ Translation failed for {label}, using original")
+            return text
 
     def generate_title(self) -> str:
         """Generate a video title in English and get approval. Returns english_title."""
@@ -516,94 +503,53 @@ FORMATTING REQUIREMENTS:
 
     def translate_all_content(self, english_title: str, english_description: str,
                               english_premise: str, english_script: str) -> dict:
-        """Translate all English content to Korean in one batch operation.
+        """Translate all English content to Korean using offline NLLB-200 model.
 
         Returns dict with keys: korean_title, korean_description, korean_premise, korean_script
         """
         print("\n" + "=" * 60)
-        print("=== TRANSLATING ALL CONTENT TO KOREAN ===")
+        print("=== TRANSLATING ALL CONTENT TO KOREAN (OFFLINE) ===")
         print("=" * 60)
-        print("\nNow that all English content is approved, translating everything to Korean...")
+        print("\nUsing NLLB-200 model for offline translation...")
         print("This will take a few minutes.\n")
 
-        # Step 1: Translate short content (title + description + premise) in one call for consistency
+        # Initialize translator
+        self.translator.initialize()
+
+        # Step 1: Translate title, description, and premise
         print("Step 1/2: Translating title, description, and premise...")
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                message = self.claude_client.messages.create(
-                    model=self.model,
-                    max_tokens=2000,
-                    messages=[{
-                        "role": "user",
-                        "content": f"""Translate the following to Korean, maintaining consistent terminology across all three:
 
-TITLE:
-{english_title}
+        print("  Translating title...")
+        korean_title = self.translator.translate(english_title)
+        if korean_title:
+            print(f"  ✓ Korean title: {korean_title}")
+        else:
+            print("  ✗ Title translation failed, using original")
+            korean_title = english_title
 
-DESCRIPTION:
-{english_description}
+        print("  Translating description...")
+        korean_description = self.translator.translate(english_description)
+        if korean_description:
+            print(f"  ✓ Korean description: {korean_description[:100]}...")
+        else:
+            print("  ✗ Description translation failed, using original")
+            korean_description = english_description
 
-PREMISE:
-{english_premise}
-
-Format your response exactly as:
-TITLE: [Korean translation]
-DESCRIPTION: [Korean translation]
-PREMISE: [Korean translation]"""
-                    }]
-                )
-                break
-            except Exception as e:
-                if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
-                    delay = 5 * (2 ** attempt)
-                    print(f"⚠ Rate limit hit. Waiting {delay} seconds before retry...")
-                    time.sleep(delay)
-                else:
-                    raise
-
-        # Parse the response
-        response_text = message.content[0].text.strip()
-        lines = response_text.split('\n')
-
-        korean_title = ""
-        korean_description = ""
-        korean_premise = ""
-
-        current_section = None
-        for line in lines:
-            if line.startswith("TITLE:"):
-                korean_title = line.replace("TITLE:", "").strip()
-                current_section = "title"
-            elif line.startswith("DESCRIPTION:"):
-                korean_description = line.replace("DESCRIPTION:", "").strip()
-                current_section = "description"
-            elif line.startswith("PREMISE:"):
-                korean_premise = line.replace("PREMISE:", "").strip()
-                current_section = "premise"
-            elif line.strip() and current_section:
-                # Multi-line content
-                if current_section == "title":
-                    korean_title += " " + line.strip()
-                elif current_section == "description":
-                    korean_description += " " + line.strip()
-                elif current_section == "premise":
-                    korean_premise += " " + line.strip()
-
-        print(f"✓ Korean title: {korean_title}")
-        print(f"✓ Korean description: {korean_description[:100]}...")
-        print(f"✓ Korean premise: {korean_premise[:100]}...")
+        print("  Translating premise...")
+        korean_premise = self.translator.translate(english_premise)
+        if korean_premise:
+            print(f"  ✓ Korean premise: {korean_premise[:100]}...")
+        else:
+            print("  ✗ Premise translation failed, using original")
+            korean_premise = english_premise
 
         # Save Korean description to file with proper formatting
         korean_description_path = self.working_dir / "video_description_korean.txt"
         with open(korean_description_path, 'w', encoding='utf-8') as f:
-            # Write description with proper line breaks preserved
             f.write(korean_description)
         print(f"✓ Korean description saved to: {korean_description_path}")
 
-        time.sleep(2)  # Small delay
-
-        # Step 2: Translate full script in chunks
+        # Step 2: Translate full script
         print("\nStep 2/2: Translating full script...")
         korean_script = self.translate_to_korean(english_script)
 
@@ -617,59 +563,23 @@ PREMISE: [Korean translation]"""
         }
 
     def translate_to_korean(self, script: str) -> str:
-        """Translate the full English script to Korean.
+        """Translate the full English script to Korean using offline NLLB-200 model.
 
-        NOTE: This method does NOT use project files to save tokens.
-        Each chunk translation is lightweight (~2000 words + small prompt).
+        Uses local translation for completely offline operation.
         """
-        print("\n=== Translating Full Script to Korean ===")
-        print("This may take a few minutes...")
-        print("  (Using lightweight API calls without project files)")
+        print("\n=== Translating Full Script to Korean (OFFLINE) ===")
+        print("Using NLLB-200 model for offline translation...")
+        print("This may take a few minutes for long scripts...")
 
-        # Split script into chunks for translation (API token limits)
-        chunks = []
-        words = script.split()
-        chunk_size = 2000
+        # Initialize translator if needed
+        self.translator.initialize()
 
-        for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i + chunk_size])
-            chunks.append(chunk)
+        # Translate using local model (handles chunking internally)
+        korean_script = self.translator.translate(script)
 
-        translated_chunks = []
-        max_retries = 3
-
-        for i, chunk in enumerate(chunks, 1):
-            print(f"Translating chunk {i}/{len(chunks)}...")
-
-            # Retry logic for each chunk
-            for attempt in range(max_retries):
-                try:
-                    message = self.claude_client.messages.create(
-                        model=self.model,
-                        max_tokens=4096,
-                        # NOTE: No system= parameter = no project files sent!
-                        messages=[{
-                            "role": "user",
-                            "content": f"Translate the following text to Korean. Maintain the tone and style:\n\n{chunk}"
-                        }]
-                    )
-
-                    translated = message.content[0].text.strip()
-                    translated_chunks.append(translated)
-                    break  # Success, exit retry loop
-
-                except Exception as e:
-                    if "rate_limit" in str(e).lower() and attempt < max_retries - 1:
-                        delay = 5 * (2 ** attempt)
-                        print(f"  ⚠ Rate limit hit. Waiting {delay} seconds before retry...")
-                        time.sleep(delay)
-                    else:
-                        raise
-
-            # Small delay between chunks to avoid rate limiting
-            time.sleep(2)
-
-        korean_script = "\n\n".join(translated_chunks)
+        if not korean_script:
+            print("✗ Translation failed")
+            return script  # Return original if translation fails
 
         # Save Korean script
         korean_path = self.working_dir / "video_script_korean.txt"
