@@ -6,11 +6,6 @@ pillow>=10.0.0
 webdriver-manager>=4.0.0
 edge-tts>=6.1.0
 
-# Translation using Opus-MT (Helsinki-NLP)
-transformers>=4.30.0
-sentencepiece>=0.1.99
-torch>=2.0.0
-
 # Optional - pydub doesn't work on Python 3.13+ (audioop removed)
 # The script will use ffprobe instead if pydub is not available
 # pydub>=0.25.1

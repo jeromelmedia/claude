@@ -380,15 +380,34 @@ class VideoGenerationMacroBrowser:
                     }}
                 }}
 
-                // Return the LONGEST message (likely the full response)
+                // Return the LATEST message (by DOM order, not longest!)
+                // CRITICAL FIX: When generating multiple segments, we need the LAST message,
+                // not the LONGEST message (which could be a previous segment)
                 if (allMessages.length > 0) {{
-                    // Sort by length descending to get longest message
-                    allMessages.sort(function(a, b) {{ return b.length - a.length; }});
-                    var longestMsg = allMessages[0];
+                    // Group messages by selector and find the last (highest index) for each
+                    var lastBySelector = {{}};
+                    for (var i = 0; i < allMessages.length; i++) {{
+                        var msg = allMessages[i];
+                        var selector = msg.selector;
+
+                        if (!lastBySelector[selector] || msg.index > lastBySelector[selector].index) {{
+                            lastBySelector[selector] = msg;
+                        }}
+                    }}
+
+                    // Now find the longest among these last messages
+                    // (or just pick the first one we find, since they should all be the latest response)
+                    var latestMsg = null;
+                    for (var selector in lastBySelector) {{
+                        if (!latestMsg || lastBySelector[selector].length > latestMsg.length) {{
+                            latestMsg = lastBySelector[selector];
+                        }}
+                    }}
+
                     return JSON.stringify({{
                         success: true,
-                        text: longestMsg.text,
-                        method: longestMsg.selector,
+                        text: latestMsg.text,
+                        method: latestMsg.selector,
                         count: allMessages.length
                     }});
                 }}
@@ -519,11 +538,67 @@ class VideoGenerationMacroBrowser:
                            If False, keep hashtags (for descriptions).
             filter_previous_content: Previous content to filter out (e.g., description text when extracting premise).
         """
+        # CRITICAL: Detect if response contains prompt text (indicates wrong extraction)
+        prompt_indicators = [
+            'Use the "korean video',
+            'file in this project as reference',
+            'REQUIREMENTS:',
+            'CRITICAL:',
+            'LANGUAGE REQUIREMENTS',
+            'JUST OUTPUT',
+            'Generate a',
+            'Write a',
+            'Translate',
+            'in this project as reference for:'
+        ]
+
+        # Check if response looks like it contains prompt text
+        response_lower = response.lower()
+        for indicator in prompt_indicators:
+            if indicator.lower() in response_lower:
+                # This response contains prompt text - try to extract only the generated part
+                print(f"⚠ Warning: Response contains prompt text. Attempting to extract generated content...")
+
+                # Try to find where the actual content starts (after the prompt)
+                # Look for the end of the prompt (usually marked by "JUST OUTPUT" or similar)
+                end_markers = [
+                    'JUST OUTPUT THE',
+                    'JUST OUTPUT',
+                    'OUTPUT THE',
+                    'Write in pure',
+                    'Make it DETAILED'
+                ]
+
+                best_split_pos = -1
+                for marker in end_markers:
+                    pos = response_lower.find(marker.lower())
+                    if pos > best_split_pos:
+                        best_split_pos = pos
+
+                if best_split_pos > 0:
+                    # Find the end of this line and start from the next line
+                    next_line_pos = response.find('\n', best_split_pos)
+                    if next_line_pos > 0:
+                        response = response[next_line_pos + 1:].strip()
+                        print(f"✓ Extracted content after prompt marker")
+                        # Debug: show how much content is left after extraction
+                        if len(response) < 50:
+                            print(f"⚠ Warning: Very short content after extraction ({len(response)} chars): {response[:100]}")
+                    else:
+                        # If no newline found, skip the first half of the response
+                        response = response[best_split_pos + 100:].strip()
+                        print(f"✓ Extracted content after prompt marker (no newline)")
+                else:
+                    print(f"⚠ Could not find prompt end marker - extraction may be incomplete")
+
+                break
+
         # Remove common Claude prefixes/explanations
         lines = response.split('\n')
 
         # Filter out lines that are clearly Claude's internal process or call-to-action
-        skip_patterns = [
+        # Patterns that should match at the START of a line
+        skip_patterns_start = [
             'I need to',
             'I\'ll search',
             'Let me',
@@ -534,11 +609,7 @@ class VideoGenerationMacroBrowser:
             'According to',
             'I can see',
             'Looking at',
-            'relevant sections',
-            'results',
             'Show working file',
-            'TEXT',
-            'relevant sections',
             'Reading the',
             'Reading another',
             'Now I understand',
@@ -546,16 +617,39 @@ class VideoGenerationMacroBrowser:
             'Subscribe',
             'turn on notifications',
             'Drop a comment',
-            'never miss'
+            'never miss',
+            'Use the',
+            'REQUIREMENTS',
+            'CRITICAL',
+            'LANGUAGE REQUIREMENTS',
+            'Generate a',
+            'Write a',
+            'Translate'
+        ]
+
+        # Patterns that should match ANYWHERE in the line (not just at start)
+        skip_patterns_contains = [
+            'relevant sections',
+            'relevant section',
+            ' results',  # with leading space to avoid false positives
+            'TEXT',
+            '.txt',  # Filter out file names from Claude project search
+            'in this project as reference',
+            'JUST OUTPUT',
+            'No explanations'
         ]
 
         # Collect candidate lines (not process text)
         candidates = []
 
-        # If we have previous content to filter, split it into lines for comparison
+        # If we have previous content to filter, prepare it for comparison
         previous_lines = []
+        previous_content_normalized = ""
         if filter_previous_content:
+            # Store lines for line-by-line comparison
             previous_lines = [l.strip() for l in filter_previous_content.split('\n') if l.strip()]
+            # Also store normalized version (remove extra whitespace, lowercase) for whole-text matching
+            previous_content_normalized = ' '.join(filter_previous_content.split()).lower()
 
         for line in lines:
             line_stripped = line.strip()
@@ -564,12 +658,19 @@ class VideoGenerationMacroBrowser:
             if not line_stripped:
                 continue
 
-            # Skip lines that match process patterns
+            # Skip lines that match process patterns (startswith check)
             is_process = False
-            for pattern in skip_patterns:
+            for pattern in skip_patterns_start:
                 if line_stripped.startswith(pattern):
                     is_process = True
                     break
+
+            # Skip lines that contain certain patterns anywhere
+            if not is_process:
+                for pattern in skip_patterns_contains:
+                    if pattern in line_stripped:
+                        is_process = True
+                        break
 
             # Skip hashtag lines only if filter_hashtags is True (for premises)
             if filter_hashtags and (line_stripped.startswith('#') or (line_stripped.count('#') > 2)):
@@ -577,8 +678,9 @@ class VideoGenerationMacroBrowser:
 
             # CRITICAL: Skip lines that match previous content (e.g., description when extracting premise)
             if filter_previous_content:
-                # Check if this line matches any line from previous content
                 is_previous_content = False
+
+                # Method 1: Line-by-line comparison (existing logic)
                 for prev_line in previous_lines:
                     # Check if line is similar to previous content (allow some flexibility)
                     if len(prev_line) > 20 and prev_line[:50] in line_stripped:
@@ -587,6 +689,15 @@ class VideoGenerationMacroBrowser:
                     if len(line_stripped) > 20 and line_stripped[:50] in prev_line:
                         is_previous_content = True
                         break
+
+                # Method 2: Check if this line appears in the normalized previous content
+                # This catches cases where description is reformatted on one line
+                if not is_previous_content and len(line_stripped) > 40:
+                    # Normalize this line and check if it's a substantial part of previous content
+                    line_normalized = line_stripped.lower()
+                    # If this line (or a significant portion of it) appears in previous content, skip it
+                    if line_normalized[:60] in previous_content_normalized:
+                        is_previous_content = True
 
                 if is_previous_content:
                     continue
@@ -605,19 +716,35 @@ class VideoGenerationMacroBrowser:
                 result = candidates[-1].strip('"\'')
                 return result
 
-        # Fallback: Look for content after common intro phrases
-        for intro in ['title:', 'here\'s an', 'here is', ':']:
+        # If no candidates found, try fallback approaches
+        print(f"⚠ No candidates found after filtering. Trying fallback extraction...")
+
+        # Fallback 1: Look for content after common intro phrases
+        for intro in ['title:', 'here\'s an', 'here is', 'premise:', 'translation:']:
             if intro in response.lower():
                 parts = response.lower().split(intro)
                 if len(parts) > 1:
                     # Get everything after the intro phrase
                     content = response[response.lower().index(intro) + len(intro):].strip()
-                    # Get first line of that
-                    first_line = content.split('\n')[0].strip().strip('"\'')
-                    if first_line:
-                        return first_line
+                    # Get first line of that (or full content if extract_all)
+                    if extract_all:
+                        return content
+                    else:
+                        first_line = content.split('\n')[0].strip().strip('"\'')
+                        if first_line:
+                            return first_line
 
-        # Last resort: Return the whole response cleaned up
+        # Fallback 2: If response is short (< 1000 chars), it might be the actual content
+        # (filters might have been too aggressive)
+        if len(response) < 1000:
+            # Clean up and return - but skip very short responses (< 20 chars) that are clearly wrong
+            cleaned = response.strip().strip('"\'')
+            if len(cleaned) > 20:
+                print(f"✓ Using fallback: returning short response ({len(cleaned)} chars)")
+                return cleaned
+
+        # Last resort: Return the whole response cleaned up (let user decide if it's correct)
+        print(f"⚠ Using last resort: returning full response ({len(response)} chars)")
         return response.strip().strip('"\'')
 
     def generate_title_browser(self) -> str:
@@ -668,25 +795,16 @@ JUST OUTPUT THE TITLE. No explanations."""
                 print("\nRegenerating...")
                 continue
             elif choice == 'm':
-                modification = input("\nWhat would you like to change? ")
-                print("\nModifying...")
+                print("\nPaste the correct title below, then press Enter:")
+                title = input().strip()
 
-                modify_prompt = f"""Current title: "{title}"
+                if not title:
+                    print("No title entered. Starting over...")
+                    continue
 
-User wants this change: {modification}
+                print(f"\nUsing your title:\n{title}\n")
 
-Generate the modified title. JUST OUTPUT THE NEW TITLE."""
-
-                response = self.send_prompt_and_wait(
-                    modify_prompt,
-                    wait_time=90,
-                    stabilization_wait=25,
-                    max_stability_checks=20
-                )
-                title = self.extract_generated_content(response)
-                print(f"\nModified Title:\n{title}\n")
-
-                # Ask for approval again
+                # Ask for approval
                 if input("Approve this version? [y/n]: ").lower() == 'y':
                     print("\nTitle approved\n")
                     return title
@@ -756,22 +874,23 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE,
                 print("\nRegenerating...")
                 continue
             elif choice == 'm':
-                modification = input("\nWhat would you like to change? ")
-                modify_prompt = f"""Current description: "{description}"
+                print("\nPaste the correct description below.")
+                print("When done, type 'END' on a new line and press Enter:")
+                lines = []
+                while True:
+                    line = input()
+                    if line.strip() == 'END':
+                        break
+                    lines.append(line)
 
-User wants this change: {modification}
+                description = '\n'.join(lines).strip()
 
-Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST OUTPUT THE NEW DESCRIPTION."""
+                if not description:
+                    print("No description entered. Starting over...")
+                    continue
 
-                response = self.send_prompt_and_wait(
-                    modify_prompt,
-                    wait_time=180,
-                    stabilization_wait=30,
-                    max_stability_checks=30
-                )
-                description = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Get full description WITH hashtags
                 char_count = len(description)
-                print(f"\nModified Description ({char_count} characters):\n{description}\n")
+                print(f"\nUsing your description ({char_count} characters):\n{description}\n")
 
                 if char_count > 5000:
                     print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
@@ -812,10 +931,10 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 prompt,
                 wait_time=90,
                 stabilization_wait=25,
-                max_stability_checks=20,
-                previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
+                max_stability_checks=20
             )
-            premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Extract ALL lines for 2-3 sentence premise
+            # SIMPLE FIX: Don't filter description - premise is separate content
+            premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)
 
             print(f"\nGenerated Premise:\n{premise}\n")
 
@@ -828,22 +947,22 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
                 print("\nRegenerating...")
                 continue
             elif choice == 'm':
-                modification = input("\nWhat would you like to change? ")
-                modify_prompt = f"""Current premise: "{premise}"
+                print("\nPaste the correct premise below.")
+                print("When done, type 'END' on a new line and press Enter:")
+                lines = []
+                while True:
+                    line = input()
+                    if line.strip() == 'END':
+                        break
+                    lines.append(line)
 
-User wants this change: {modification}
+                premise = '\n'.join(lines).strip()
 
-Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
+                if not premise:
+                    print("No premise entered. Starting over...")
+                    continue
 
-                response = self.send_prompt_and_wait(
-                    modify_prompt,
-                    wait_time=90,
-                    stabilization_wait=25,
-                    max_stability_checks=20,
-                    previous_content_to_filter=""  # Don't filter at JS level - filter at content level instead
-                )
-                premise = self.extract_generated_content(response, extract_all=True, filter_hashtags=False)  # Extract ALL lines for 2-3 sentence premise
-                print(f"\nModified Premise:\n{premise}\n")
+                print(f"\nUsing your premise:\n{premise}\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
                     print("\nPremise approved\n")
@@ -902,6 +1021,11 @@ NO FABRICATED CONTENT:
 - Patient STORIES are okay, but NO direct quotes
 - Describe what happened without using quotation marks
 
+IMPORTANT:
+- DO NOT add "END" or "end" at the end of the segment
+- DO NOT add markers like "---" or "====" at the end
+- The segment should end naturally with the last sentence
+
 JUST WRITE THE SCRIPT SEGMENT IN PURE ENGLISH. NO explanations, NO "here's the segment", JUST THE SCRIPT."""
 
         # EXTRA LONG waits for script segments (they're 1625+ words)
@@ -912,6 +1036,17 @@ JUST WRITE THE SCRIPT SEGMENT IN PURE ENGLISH. NO explanations, NO "here's the s
             max_stability_checks=30  # 30 checks = up to 150 more seconds (up from 20)
         )
         segment_text = self.extract_generated_content(response, extract_all=True)  # Get ALL lines for scripts
+
+        # CRITICAL: Remove trailing "end" or "END" that Claude might add
+        segment_text = segment_text.strip()
+        if segment_text.lower().endswith('end'):
+            # Check if it's a standalone "end" (not part of a word like "recommend")
+            if segment_text[-4:].lower() == '\nend':
+                segment_text = segment_text[:-4].strip()
+                print(f"  ✓ Removed trailing 'end' marker")
+            elif segment_text[-3:].lower() == 'end' and (len(segment_text) < 4 or not segment_text[-4].isalpha()):
+                segment_text = segment_text[:-3].strip()
+                print(f"  ✓ Removed trailing 'end' marker")
 
         word_count = len(segment_text.split())
         print(f"  Segment {segment_num} complete (~{word_count} words)\n")
@@ -1035,30 +1170,24 @@ Generate the ADDITIONAL content only:"""
                 # Recursive call to regenerate
                 return self.generate_full_script_browser(title, premise)
             elif choice == 'm':
-                modification = input("\nWhat would you like to change in the script? ")
-                print("\nModifying script...")
+                print("\nPaste the correct script below.")
+                print("When done, type 'END' on a new line and press Enter:")
+                lines = []
+                while True:
+                    line = input()
+                    if line.strip() == 'END':
+                        break
+                    lines.append(line)
 
-                modify_prompt = f"""Current script ({total_words} words):
+                full_script = '\n'.join(lines).strip()
 
-{full_script[:2000]}... [script continues]
+                if not full_script:
+                    print("No script entered. Continuing with modifications...")
+                    continue
 
-User wants this change: {modification}
-
-Generate the modified FULL script incorporating this change. Keep it 6000-7000 words.
-
-JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
-
-                response = self.send_prompt_and_wait(
-                    modify_prompt,
-                    wait_time=300,
-                    stabilization_wait=40,
-                    max_stability_checks=35
-                )
-                full_script = response.strip()
                 total_words = len(full_script.split())
-
-                print(f"\nModified script: {total_words} words")
-                print("\nModified Script Preview:")
+                print(f"\nUsing your script: {total_words} words")
+                print("\nScript Preview:")
                 print(full_script[:500] + "...\n")
 
                 if input("Approve this version? [y/n]: ").lower() == 'y':
@@ -1071,27 +1200,62 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 print("Invalid choice. Please enter 'a', 'd', or 'm'")
                 continue
 
+    def clean_formatting(self, text: str) -> str:
+        """Remove any strikethrough, HTML tags, and markdown formatting from text"""
+        import re
+
+        # Remove HTML strikethrough tags
+        text = re.sub(r'<s>|</s>', '', text)
+        text = re.sub(r'<del>|</del>', '', text)
+        text = re.sub(r'<strike>|</strike>', '', text)
+
+        # Remove markdown strikethrough (~~text~~)
+        text = re.sub(r'~~([^~]+)~~', r'\1', text)
+
+        # Remove any other HTML tags
+        text = re.sub(r'<[^>]+>', '', text)
+
+        # Remove markdown bold/italic
+        text = re.sub(r'\*\*([^\*]+)\*\*', r'\1', text)
+        text = re.sub(r'\*([^\*]+)\*', r'\1', text)
+        text = re.sub(r'__([^_]+)__', r'\1', text)
+        text = re.sub(r'_([^_]+)_', r'\1', text)
+
+        return text.strip()
+
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
         """Translate text to Korean using Claude.ai Project"""
         print(f"Translating {content_type} to Korean...")
 
-        prompt = f"""DO NOT explain. Translate NOW.
-
-Translate to natural Korean for seniors (60+):
+        prompt = f"""Translate this to natural Korean for seniors (60+):
 
 {text}
 
-JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
+CRITICAL REQUIREMENTS:
+- Output ONLY the Korean translation
+- NO formatting, NO markdown, NO strikethrough, NO HTML tags
+- PLAIN TEXT ONLY - just the Korean characters
+- NO explanations, NO English, NO commentary
+- Do NOT compare old and new versions
+- Do NOT show what changed
+- JUST the complete Korean translation in plain text"""
 
         # Increase wait times based on content type
         if content_type == "description":
             wait_time = 180
             stabilization = 30
             checks = 30
+            extract_all = True  # Get full description
+        elif content_type == "title":
+            wait_time = 120
+            stabilization = 25
+            checks = 25
+            extract_all = False  # Get only last line (the actual title)
         else:
             wait_time = 120
             stabilization = 25
             checks = 25
+            extract_all = True  # Default to full content
 
         response = self.send_prompt_and_wait(
             prompt,
@@ -1099,7 +1263,13 @@ JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
             stabilization_wait=stabilization,
             max_stability_checks=checks
         )
-        return response.strip()
+
+        # CRITICAL: Use extract_generated_content to filter out Claude's process text
+        extracted = self.extract_generated_content(response, extract_all=extract_all, filter_hashtags=False)
+
+        # Clean any formatting that might have slipped through
+        cleaned = self.clean_formatting(extracted)
+        return cleaned.strip()
 
     def validate_script_endings(self, english_script: str, korean_script: str) -> bool:
         """Validate that Korean translation is complete by checking if endings match"""
@@ -1187,6 +1357,15 @@ CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
 - Use natural, conversational Korean for seniors (60+)
 - Keep the same emotional impact and urgency
 
+OUTPUT REQUIREMENTS - CRITICAL:
+- Output ONLY the Korean translation
+- NO formatting, NO markdown, NO strikethrough, NO HTML tags
+- PLAIN TEXT ONLY - just the Korean characters
+- NO explanations, NO English, NO commentary
+- Do NOT compare old and new versions
+- Do NOT show what was changed or removed
+- JUST the complete Korean translation in plain text
+
 JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL script."""
 
         response = self.send_prompt_and_wait(
@@ -1200,6 +1379,9 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
         korean_script = self.extract_generated_content(response, extract_all=True)
 
+        # Clean any formatting that might have slipped through
+        korean_script = self.clean_formatting(korean_script)
+
         # Show character count and word estimate
         char_count = len(korean_script)
         word_estimate = char_count // 2  # Korean characters are roughly 2 chars per word
@@ -1211,66 +1393,121 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
         return korean_script
 
-    def upload_file_to_project(self, file_path: str) -> bool:
-        """Upload a file to the Claude.ai Project"""
-        try:
-            print(f"\nUploading {Path(file_path).name}...")
+    def upload_file_to_project(self, file_path: str, max_retries: int = 3) -> bool:
+        """Upload a file to the Claude.ai Project with retry logic and verification"""
+        file_name = Path(file_path).name
 
-            # Look for the file upload button/icon
-            # Try multiple methods to find and click upload
-            upload_selectors = [
-                "button[aria-label*='upload' i]",
-                "button[aria-label*='attach' i]",
-                "input[type='file']",
-                "button:has(svg[class*='paperclip'])",
-                "button:has(svg[class*='upload'])"
-            ]
-
-            upload_element = None
-            for selector in upload_selectors:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    upload_element = elements[0]
-                    break
-
-            if not upload_element:
-                # Try to find hidden file input and use JavaScript
-                file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-                if file_inputs:
-                    # Make it visible and interactable
-                    self.driver.execute_script("""
-                        arguments[0].style.display = 'block';
-                        arguments[0].style.visibility = 'visible';
-                        arguments[0].style.opacity = '1';
-                    """, file_inputs[0])
-                    upload_element = file_inputs[0]
-
-            if upload_element:
-                # If it's a file input, send the file path directly
-                if upload_element.tag_name == 'input':
-                    abs_path = str(Path(file_path).absolute())
-                    upload_element.send_keys(abs_path)
-                    print(f"File uploaded\n")
+        for attempt in range(max_retries):
+            try:
+                if attempt > 0:
+                    print(f"  Retry {attempt}/{max_retries-1}...")
                 else:
-                    # If it's a button, click it first then find the file input
-                    upload_element.click()
-                    time.sleep(1)
+                    print(f"\nUploading {file_name}...")
+
+                # Look for the file upload button/icon
+                # Try multiple methods to find and click upload
+                upload_selectors = [
+                    "input[type='file']",  # Try file input first (most reliable)
+                    "button[aria-label*='upload' i]",
+                    "button[aria-label*='attach' i]",
+                    "button[aria-label*='file' i]",
+                    "button:has(svg[class*='paperclip'])",
+                    "button:has(svg[class*='upload'])",
+                    "button:has(svg[class*='attach'])"
+                ]
+
+                upload_element = None
+                for selector in upload_selectors:
+                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if elements:
+                        upload_element = elements[0]
+                        print(f"  Found upload element using: {selector}")
+                        break
+
+                if not upload_element:
+                    # Try to find ANY file input and use JavaScript to make it visible
                     file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
                     if file_inputs:
-                        abs_path = str(Path(file_path).absolute())
-                        file_inputs[0].send_keys(abs_path)
-                        print(f"File uploaded\n")
+                        # Make it visible and interactable
+                        self.driver.execute_script("""
+                            arguments[0].style.display = 'block';
+                            arguments[0].style.visibility = 'visible';
+                            arguments[0].style.opacity = '1';
+                            arguments[0].style.position = 'relative';
+                        """, file_inputs[0])
+                        upload_element = file_inputs[0]
+                        print(f"  Made hidden file input visible")
 
-                # Wait for upload to complete
-                time.sleep(5)
-                return True
-            else:
-                print("Could not find upload mechanism")
-                return False
+                if upload_element:
+                    abs_path = str(Path(file_path).absolute())
 
-        except Exception as e:
-            print(f"Error uploading file: {e}")
-            return False
+                    # If it's a file input, send the file path directly
+                    if upload_element.tag_name == 'input':
+                        upload_element.send_keys(abs_path)
+                        print(f"  File sent to input element")
+                    else:
+                        # If it's a button, click it first then find the file input
+                        upload_element.click()
+                        time.sleep(2)
+                        file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
+                        if file_inputs:
+                            file_inputs[0].send_keys(abs_path)
+                            print(f"  File sent after clicking button")
+                        else:
+                            print(f"  Could not find file input after clicking button")
+                            continue
+
+                    # Wait for upload to start processing
+                    print(f"  Waiting for upload to process...")
+                    time.sleep(3)
+
+                    # Verify upload by checking for file name in the page
+                    # Wait up to 15 seconds for the file to appear
+                    verification_wait = 15
+                    verification_interval = 2
+                    verified = False
+
+                    for check in range(verification_wait // verification_interval):
+                        time.sleep(verification_interval)
+                        page_text = self.driver.find_element(By.TAG_NAME, "body").text
+
+                        if file_name in page_text:
+                            print(f"  ✓ Upload verified: {file_name} found in project")
+                            verified = True
+                            break
+                        else:
+                            print(f"  Checking... ({(check+1)*verification_interval}s)")
+
+                    if verified:
+                        # Extra wait for file to be fully indexed
+                        print(f"  Waiting for file to be fully indexed...")
+                        time.sleep(5)
+                        return True
+                    else:
+                        print(f"  ✗ Could not verify upload - file not found in UI")
+                        if attempt < max_retries - 1:
+                            print(f"  Will retry...")
+                            time.sleep(3)
+                            continue
+                        else:
+                            return False
+                else:
+                    print("  ✗ Could not find upload mechanism")
+                    if attempt < max_retries - 1:
+                        time.sleep(3)
+                        continue
+                    else:
+                        return False
+
+            except Exception as e:
+                print(f"  ✗ Upload error: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(3)
+                    continue
+                else:
+                    return False
+
+        return False
 
     # === CHARACTER SELECTION ===
 
@@ -1830,14 +2067,23 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
 
             # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
             print("="*50)
-            print("UPLOADING SCRIPT")
+            print("UPLOADING SCRIPT TO CLAUDE PROJECT")
             print("="*50)
 
             upload_success = self.upload_file_to_project(str(script_path))
-            if upload_success:
-                time.sleep(3)  # Wait for upload to fully process
-            else:
-                print("Upload failed")
+            if not upload_success:
+                print("\n✗ CRITICAL ERROR: Failed to upload script file")
+                print("Cannot proceed with translation without the script file.")
+                print("Please check:")
+                print("  1. Browser is still open and logged in")
+                print("  2. Project page is accessible")
+                print("  3. File upload feature is available")
+                if self.driver:
+                    self.driver.quit()
+                return
+
+            print("\n✓ Script file uploaded successfully")
+            time.sleep(3)  # Extra wait for file to be indexed
 
             # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
             print("="*50)
