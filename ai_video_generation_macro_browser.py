@@ -1196,155 +1196,27 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 continue
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
-        """Translate text to Korean using local Opus-MT translator (offline, no API calls)"""
-        if self.local_translator:
-            # Use local translator (offline, no API calls)
-            return self.local_translator.translate(text, content_type)
-        else:
-            # Fallback to Claude API if local translator not available
-            print(f"\n⚠ Local translator not available, using Claude API...")
-            print(f"Translating {content_type} to Korean...")
+        """Translate text to Korean using ONLY local Opus-MT translator (offline, no API calls)"""
+        if not self.local_translator:
+            raise RuntimeError("Local Opus-MT translator not available! Cannot translate without it.")
 
-            prompt = f"""DO NOT explain. Translate NOW.
-
-Translate to natural Korean for seniors (60+):
-
-{text}
-
-JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
-
-            # Increase wait times based on content type
-            if content_type == "description":
-                wait_time = 180
-                stabilization = 30
-                checks = 30
-            else:
-                wait_time = 120
-                stabilization = 25
-                checks = 25
-
-            response = self.send_prompt_and_wait(
-                prompt,
-                wait_time=wait_time,
-                stabilization_wait=stabilization,
-                max_stability_checks=checks
-            )
-            return response.strip()
-
-    def validate_script_endings(self, english_script: str, korean_script: str) -> bool:
-        """Validate that Korean translation is complete by checking if endings match"""
-        print("\n=== Validating Translation Completeness ===")
-
-        # Get last sentence from English script
-        import re
-        english_sentences = re.split(r'(?<=[.!?])\s+', english_script.strip())
-        english_sentences = [s.strip() for s in english_sentences if s.strip()]
-
-        if not english_sentences:
-            print("⚠ WARNING: Could not parse English script into sentences")
-            return False
-
-        last_english_sentence = english_sentences[-1]
-
-        # Get last ~20 words from English script
-        english_words = english_script.strip().split()
-        last_20_english = ' '.join(english_words[-20:])
-
-        # Get last ~20 words from Korean script
-        korean_words = korean_script.strip().split()
-        last_20_korean = ' '.join(korean_words[-20:])
-
-        print(f"\nLast 20 words of English script:")
-        print(f"  ...{last_20_english}")
-        print(f"\nLast 20 words of Korean script:")
-        print(f"  ...{last_20_korean}")
-
-        # Now translate just the last English sentence to verify
-        print(f"\nVerifying translation of final sentence...")
-        print(f"Final English sentence: {last_english_sentence}")
-
-        validation_prompt = f"""Translate ONLY this sentence to Korean:
-
-{last_english_sentence}
-
-JUST OUTPUT THE KOREAN TRANSLATION. No explanations."""
-
-        response = self.send_prompt_and_wait(
-            validation_prompt,
-            wait_time=60,
-            stabilization_wait=15,
-            max_stability_checks=10
-        )
-
-        expected_korean_ending = response.strip()
-        print(f"\nExpected Korean ending: {expected_korean_ending}")
-
-        # Check if Korean script ends with something similar to the expected ending
-        # We'll check if the last ~100 characters of Korean script contain the expected ending
-        korean_tail = korean_script.strip()[-200:].strip()
-
-        # Simple check: does the Korean script end with similar content?
-        # We can't do exact match due to minor formatting differences
-        similarity_found = expected_korean_ending[:30] in korean_tail if len(expected_korean_ending) > 30 else expected_korean_ending[:15] in korean_tail
-
-        if similarity_found:
-            print("✓ Translation appears complete - endings match!\n")
-            return True
-        else:
-            print("⚠ WARNING: Translation ending doesn't match expected translation!")
-            print("This might indicate the translation was truncated.\n")
-            print(f"Looking for: {expected_korean_ending[:50]}...")
-            print(f"Found at end: {korean_tail[-100:]}\n")
-
-            choice = input("Continue anyway? [y/n]: ").lower()
-            return choice == 'y'
+        # Use local translator ONLY (offline, no API calls)
+        return self.local_translator.translate(text, content_type)
 
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
-        """Translate full script to Korean using local Opus-MT translator (offline, no API calls)"""
+        """Translate full script to Korean using ONLY local Opus-MT translator (offline, no API calls)"""
         print("\n=== Translating Full Script to Korean ===")
+
+        if not self.local_translator:
+            raise RuntimeError("Local Opus-MT translator not available! Cannot translate without it.")
 
         # Read the English script from file
         with open(script_file_path, 'r', encoding='utf-8') as f:
             english_script = f.read()
 
-        if self.local_translator:
-            # Use local translator with chunking (offline, no API calls)
-            print("  (Using local Opus-MT translator - no API calls!)")
-            korean_script = self.local_translator.translate_in_chunks(english_script, chunk_size=1000, label="script")
-        else:
-            # Fallback to Claude API if local translator not available
-            print("  ⚠ Using Claude API for translation (local translator not available)")
-
-            prompt = f"""Translate the ENTIRE English script to Korean.
-
-CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
-- Read the ENTIRE script from beginning to end
-- Translate EVERY sentence and paragraph
-- Do NOT stop early or truncate
-- The script should be approximately 6000-7000 words in English
-- Your Korean translation should be similarly long and complete
-- Maintain the storytelling style and dramatic tone
-- Keep all numbers, ages, and specific details accurate
-- Preserve the paragraph structure and formatting
-- Use natural, conversational Korean for seniors (60+)
-- Keep the same emotional impact and urgency
-
-Script to translate:
-
-{english_script}
-
-JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL script."""
-
-            response = self.send_prompt_and_wait(
-                prompt,
-                wait_time=600,  # 10 minutes for full script translation
-                stabilization_wait=90,  # Much longer initial wait for large translation
-                max_stability_checks=60,  # More checks for translation to ensure complete
-                stability_threshold=12,  # Require 12 consecutive stable checks (not just 5)
-                stability_check_interval=10  # Wait 10 seconds between checks (not just 5)
-            )
-
-            korean_script = self.extract_generated_content(response, extract_all=True)
+        # Use local translator with chunking (offline, no API calls, smaller chunks for better quality)
+        print("  (Using local Opus-MT translator - no API calls!)")
+        korean_script = self.local_translator.translate_in_chunks(english_script, chunk_size=500, label="script")
 
         # Show character count and word estimate
         char_count = len(korean_script)
@@ -1356,67 +1228,6 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             print(f"⚠ WARNING: Translation seems short ({char_count} chars). Expected ~20,000+ for full script.\n")
 
         return korean_script
-
-    def upload_file_to_project(self, file_path: str) -> bool:
-        """Upload a file to the Claude.ai Project"""
-        try:
-            print(f"\nUploading {Path(file_path).name}...")
-
-            # Look for the file upload button/icon
-            # Try multiple methods to find and click upload
-            upload_selectors = [
-                "button[aria-label*='upload' i]",
-                "button[aria-label*='attach' i]",
-                "input[type='file']",
-                "button:has(svg[class*='paperclip'])",
-                "button:has(svg[class*='upload'])"
-            ]
-
-            upload_element = None
-            for selector in upload_selectors:
-                elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                if elements:
-                    upload_element = elements[0]
-                    break
-
-            if not upload_element:
-                # Try to find hidden file input and use JavaScript
-                file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-                if file_inputs:
-                    # Make it visible and interactable
-                    self.driver.execute_script("""
-                        arguments[0].style.display = 'block';
-                        arguments[0].style.visibility = 'visible';
-                        arguments[0].style.opacity = '1';
-                    """, file_inputs[0])
-                    upload_element = file_inputs[0]
-
-            if upload_element:
-                # If it's a file input, send the file path directly
-                if upload_element.tag_name == 'input':
-                    abs_path = str(Path(file_path).absolute())
-                    upload_element.send_keys(abs_path)
-                    print(f"File uploaded\n")
-                else:
-                    # If it's a button, click it first then find the file input
-                    upload_element.click()
-                    time.sleep(1)
-                    file_inputs = self.driver.find_elements(By.CSS_SELECTOR, "input[type='file']")
-                    if file_inputs:
-                        abs_path = str(Path(file_path).absolute())
-                        file_inputs[0].send_keys(abs_path)
-                        print(f"File uploaded\n")
-
-                # Wait for upload to complete
-                time.sleep(5)
-                return True
-            else:
-                print("Could not find upload mechanism")
-                return False
-
-        except Exception as e:
-            print(f"Error uploading file: {e}")
-            return False
 
     # === CHARACTER SELECTION ===
 
@@ -1916,15 +1727,39 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             print("PHASE 1: GENERATE ENGLISH CONTENT")
             print("="*50)
 
+            # STEP 1: Generate and save title immediately
             english_title = self.generate_title_browser()
+
+            # Create output folder immediately after title is approved
+            folder_name = self.sanitize_filename(english_title)
+            self.working_dir = self.base_output_dir / folder_name
+            self.working_dir.mkdir(exist_ok=True)
+            print(f"\nOutput folder: {self.working_dir}")
+
+            # Save English title immediately
+            title_path = self.working_dir / "video_title_english.txt"
+            with open(title_path, 'w', encoding='utf-8') as f:
+                f.write(english_title)
+            print(f"✓ Saved: {title_path.name}\n")
+
             time.sleep(5)
 
+            # STEP 2: Generate and save description immediately
             english_description = self.generate_description_browser(english_title)
+
+            # Save English description immediately
+            description_path = self.working_dir / "video_description_english.txt"
+            with open(description_path, 'w', encoding='utf-8') as f:
+                f.write(english_description)
+            print(f"✓ Saved: {description_path.name}\n")
+
             time.sleep(5)
 
+            # STEP 3: Generate premise (no save needed, just used for script generation)
             english_premise = self.generate_premise_browser(english_title, english_description)
             time.sleep(5)
 
+            # STEP 4: Generate and save script immediately
             english_script = self.generate_full_script_browser(english_title, english_premise)
 
             # Validate English script was fully captured
@@ -1951,78 +1786,50 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             else:
                 print("✓ Script appears complete (ends with proper punctuation)\n")
 
-            # === CREATE OUTPUT FOLDER ===
-            folder_name = self.sanitize_filename(english_title)
-            self.working_dir = self.base_output_dir / folder_name
-            self.working_dir.mkdir(exist_ok=True)
-
-            print(f"\nOutput folder: {self.working_dir}")
-
-            # Save English title
-            title_path = self.working_dir / "video_title_english.txt"
-            with open(title_path, 'w', encoding='utf-8') as f:
-                f.write(english_title)
-
-            # Save English description
-            description_path = self.working_dir / "video_description_english.txt"
-            with open(description_path, 'w', encoding='utf-8') as f:
-                f.write(english_description)
-
-            # Save English script (ONLY the script, no title/description)
+            # Save English script immediately
             script_path = self.working_dir / "video_script_english.txt"
             with open(script_path, 'w', encoding='utf-8') as f:
                 f.write(english_script)
-            print(f"English files saved\n")
+            print(f"✓ Saved: {script_path.name}\n")
 
-            # === UPLOAD SCRIPT TO CLAUDE PROJECT ===
-            print("="*50)
-            print("UPLOADING SCRIPT")
-            print("="*50)
+            print("All English files saved")
 
-            upload_success = self.upload_file_to_project(str(script_path))
-            if upload_success:
-                time.sleep(3)  # Wait for upload to fully process
-            else:
-                print("Upload failed")
-
-            # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
-            print("="*50)
-            print("PHASE 2: TRANSLATE TO KOREAN")
+            # === PHASE 2: TRANSLATE TO KOREAN (Local Opus-MT) ===
+            print("\n" + "="*50)
+            print("PHASE 2: TRANSLATE TO KOREAN (using Opus-MT)")
             print("="*50 + "\n")
 
-            korean_title = self.translate_to_korean_browser(english_title, "title")
-            time.sleep(5)
-
-            korean_description = self.translate_to_korean_browser(english_description, "description")
-            time.sleep(5)
-
-            # Translate full script using uploaded file (not chunks)
-            korean_script = self.translate_script_to_korean_browser(str(script_path))
-
-            # Validate translation completeness by comparing endings
-            validation_passed = self.validate_script_endings(english_script, korean_script)
-
-            if not validation_passed:
-                print("Validation failed. Exiting.")
-                if self.driver:
-                    self.driver.quit()
-                return
-
-            # Save Korean title as separate file
+            # Translate title from file
+            print("Translating title from video_title_english.txt...")
+            with open(title_path, 'r', encoding='utf-8') as f:
+                english_title_text = f.read()
+            korean_title = self.translate_to_korean_browser(english_title_text, "title")
             korean_title_path = self.working_dir / "video_title_korean.txt"
             with open(korean_title_path, 'w', encoding='utf-8') as f:
                 f.write(korean_title)
+            print(f"✓ Saved: {korean_title_path.name}\n")
+            time.sleep(3)
 
-            # Save Korean description as separate file
+            # Translate description from file
+            print("Translating description from video_description_english.txt...")
+            with open(description_path, 'r', encoding='utf-8') as f:
+                english_description_text = f.read()
+            korean_description = self.translate_to_korean_browser(english_description_text, "description")
             korean_description_path = self.working_dir / "video_description_korean.txt"
             with open(korean_description_path, 'w', encoding='utf-8') as f:
                 f.write(korean_description)
+            print(f"✓ Saved: {korean_description_path.name}\n")
+            time.sleep(3)
 
-            # Save Korean script (ONLY the script, no title/description)
+            # Translate script from file
+            print("Translating script from video_script_english.txt...")
+            korean_script = self.translate_script_to_korean_browser(str(script_path))
             korean_script_path = self.working_dir / "video_script_korean.txt"
             with open(korean_script_path, 'w', encoding='utf-8') as f:
                 f.write(korean_script)
-            print(f"Korean files saved\n")
+            print(f"✓ Saved: {korean_script_path.name}\n")
+
+            print("All Korean files saved")
 
             # === CLOSE BROWSER ===
             print("Closing browser...")

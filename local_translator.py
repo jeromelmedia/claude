@@ -52,11 +52,16 @@ class LocalTranslator:
         print(f"Translating {label} to Korean (Opus-MT)...")
         print(f"  Input length: {len(text)} characters")
 
-        # Tokenize the input text
+        # Tokenize the input text - increased max_length and ensure we don't truncate
         inputs = self.tokenizer(text, return_tensors="pt", padding=True, truncation=True, max_length=512)
 
-        # Generate translation
-        translated = self.model.generate(**inputs)
+        # Generate translation with appropriate parameters
+        translated = self.model.generate(
+            **inputs,
+            max_length=512,
+            num_beams=4,  # Use beam search for better quality
+            early_stopping=True
+        )
 
         # Decode the output
         translation = self.tokenizer.decode(translated[0], skip_special_tokens=True)
@@ -66,13 +71,13 @@ class LocalTranslator:
 
         return translation
 
-    def translate_in_chunks(self, text: str, chunk_size: int = 1000, label: str = "text") -> str:
+    def translate_in_chunks(self, text: str, chunk_size: int = 500, label: str = "text") -> str:
         """
         Translate long text by splitting into chunks
 
         Args:
             text: English text to translate
-            chunk_size: Maximum words per chunk
+            chunk_size: Maximum characters per chunk (default 500 to stay well under 512 token limit)
             label: Description of what's being translated
 
         Returns:
@@ -85,22 +90,22 @@ class LocalTranslator:
         import re
         sentences = re.split(r'(?<=[.!?])\s+', text)
 
-        # Group sentences into chunks
+        # Group sentences into chunks based on CHARACTER count (not word count)
         chunks = []
         current_chunk = []
-        current_word_count = 0
+        current_char_count = 0
 
         for sentence in sentences:
-            sentence_words = len(sentence.split())
+            sentence_chars = len(sentence)
 
-            if current_word_count + sentence_words > chunk_size and current_chunk:
-                # Start new chunk
+            # If adding this sentence would exceed chunk_size, start a new chunk
+            if current_char_count + sentence_chars > chunk_size and current_chunk:
                 chunks.append(' '.join(current_chunk))
                 current_chunk = [sentence]
-                current_word_count = sentence_words
+                current_char_count = sentence_chars
             else:
                 current_chunk.append(sentence)
-                current_word_count += sentence_words
+                current_char_count += sentence_chars + 1  # +1 for space
 
         # Add final chunk
         if current_chunk:
@@ -112,14 +117,23 @@ class LocalTranslator:
         translated_chunks = []
         for i, chunk in enumerate(chunks, 1):
             print(f"  Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)...")
-            # Tokenize and translate
-            inputs = self.tokenizer(chunk, return_tensors="pt", padding=True, truncation=True, max_length=512)
-            translated = self.model.generate(**inputs)
+
+            # Tokenize and translate - do NOT truncate, chunks are already small enough
+            inputs = self.tokenizer(chunk, return_tensors="pt", padding=True, truncation=False)
+
+            # Generate with beam search for better quality
+            translated = self.model.generate(
+                **inputs,
+                max_length=512,
+                num_beams=4,
+                early_stopping=True
+            )
+
             translation = self.tokenizer.decode(translated[0], skip_special_tokens=True)
             translated_chunks.append(translation)
 
-        # Combine translations
-        full_translation = '\n\n'.join(translated_chunks)
+        # Combine translations with proper spacing
+        full_translation = ' '.join(translated_chunks)
 
         print(f"  Translation complete: {len(full_translation)} characters\n")
 
