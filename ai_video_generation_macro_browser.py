@@ -22,6 +22,14 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
+# Import local translator for offline translation
+try:
+    from local_translator import LocalTranslator
+    LOCAL_TRANSLATOR_AVAILABLE = True
+except ImportError:
+    LOCAL_TRANSLATOR_AVAILABLE = False
+    print("Note: local_translator not available, will use Claude API")
+
 class VideoGenerationMacroBrowser:
     """Browser automation version - uses Claude.ai Project for content generation"""
 
@@ -43,7 +51,16 @@ class VideoGenerationMacroBrowser:
         # Browser
         self.driver = None
 
-        print(f"Using Claude Project: {self.project_id}")
+        # Initialize local translator (loads once, reused for all translations)
+        if LOCAL_TRANSLATOR_AVAILABLE:
+            print("\nInitializing local translator...")
+            self.local_translator = LocalTranslator()
+            print("✓ Local translator ready (will use offline translation)")
+        else:
+            self.local_translator = None
+            print("\n⚠ Local translator not available - will use Claude API (uses tokens)")
+
+        print(f"\nUsing Claude Project: {self.project_id}")
         print(f"Project URL: {self.project_url}")
 
     def load_config(self, config_path: str) -> dict:
@@ -1179,10 +1196,16 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 continue
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
-        """Translate text to Korean using Claude.ai Project"""
-        print(f"Translating {content_type} to Korean...")
+        """Translate text to Korean using local Opus-MT translator (offline, no API calls)"""
+        if self.local_translator:
+            # Use local translator (offline, no API calls)
+            return self.local_translator.translate(text, content_type)
+        else:
+            # Fallback to Claude API if local translator not available
+            print(f"\n⚠ Local translator not available, using Claude API...")
+            print(f"Translating {content_type} to Korean...")
 
-        prompt = f"""DO NOT explain. Translate NOW.
+            prompt = f"""DO NOT explain. Translate NOW.
 
 Translate to natural Korean for seniors (60+):
 
@@ -1190,23 +1213,23 @@ Translate to natural Korean for seniors (60+):
 
 JUST OUTPUT THE KOREAN TEXT. No English, no explanations."""
 
-        # Increase wait times based on content type
-        if content_type == "description":
-            wait_time = 180
-            stabilization = 30
-            checks = 30
-        else:
-            wait_time = 120
-            stabilization = 25
-            checks = 25
+            # Increase wait times based on content type
+            if content_type == "description":
+                wait_time = 180
+                stabilization = 30
+                checks = 30
+            else:
+                wait_time = 120
+                stabilization = 25
+                checks = 25
 
-        response = self.send_prompt_and_wait(
-            prompt,
-            wait_time=wait_time,
-            stabilization_wait=stabilization,
-            max_stability_checks=checks
-        )
-        return response.strip()
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=wait_time,
+                stabilization_wait=stabilization,
+                max_stability_checks=checks
+            )
+            return response.strip()
 
     def validate_script_endings(self, english_script: str, korean_script: str) -> bool:
         """Validate that Korean translation is complete by checking if endings match"""
@@ -1277,13 +1300,25 @@ JUST OUTPUT THE KOREAN TRANSLATION. No explanations."""
             return choice == 'y'
 
     def translate_script_to_korean_browser(self, script_file_path: str) -> str:
-        """Translate full script to Korean using uploaded file"""
+        """Translate full script to Korean using local Opus-MT translator (offline, no API calls)"""
         print("\n=== Translating Full Script to Korean ===")
 
-        prompt = f"""Translate the ENTIRE English script from the uploaded file "video_script_english.txt" to Korean.
+        # Read the English script from file
+        with open(script_file_path, 'r', encoding='utf-8') as f:
+            english_script = f.read()
+
+        if self.local_translator:
+            # Use local translator with chunking (offline, no API calls)
+            print("  (Using local Opus-MT translator - no API calls!)")
+            korean_script = self.local_translator.translate_in_chunks(english_script, chunk_size=1000, label="script")
+        else:
+            # Fallback to Claude API if local translator not available
+            print("  ⚠ Using Claude API for translation (local translator not available)")
+
+            prompt = f"""Translate the ENTIRE English script to Korean.
 
 CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
-- Read the ENTIRE file from beginning to end
+- Read the ENTIRE script from beginning to end
 - Translate EVERY sentence and paragraph
 - Do NOT stop early or truncate
 - The script should be approximately 6000-7000 words in English
@@ -1294,18 +1329,22 @@ CRITICAL - YOU MUST TRANSLATE THE COMPLETE SCRIPT:
 - Use natural, conversational Korean for seniors (60+)
 - Keep the same emotional impact and urgency
 
+Script to translate:
+
+{english_script}
+
 JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL script."""
 
-        response = self.send_prompt_and_wait(
-            prompt,
-            wait_time=600,  # 10 minutes for full script translation
-            stabilization_wait=90,  # Much longer initial wait for large translation
-            max_stability_checks=60,  # More checks for translation to ensure complete
-            stability_threshold=12,  # Require 12 consecutive stable checks (not just 5)
-            stability_check_interval=10  # Wait 10 seconds between checks (not just 5)
-        )
+            response = self.send_prompt_and_wait(
+                prompt,
+                wait_time=600,  # 10 minutes for full script translation
+                stabilization_wait=90,  # Much longer initial wait for large translation
+                max_stability_checks=60,  # More checks for translation to ensure complete
+                stability_threshold=12,  # Require 12 consecutive stable checks (not just 5)
+                stability_check_interval=10  # Wait 10 seconds between checks (not just 5)
+            )
 
-        korean_script = self.extract_generated_content(response, extract_all=True)
+            korean_script = self.extract_generated_content(response, extract_all=True)
 
         # Show character count and word estimate
         char_count = len(korean_script)
