@@ -659,7 +659,7 @@ JUST OUTPUT THE TITLE. No explanations."""
             print(f"\nGenerated Title:\n{title}\n")
 
             # Get user approval
-            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify, [p]aste: ").lower().strip()
 
             if choice == 'a':
                 print(f"\nTitle approved\n")
@@ -693,8 +693,22 @@ Generate the modified title. JUST OUTPUT THE NEW TITLE."""
                 else:
                     print("\nStarting over...")
                     continue
+            elif choice == 'p':
+                print("\nPaste the correct title below:")
+                pasted_title = input("Title: ").strip()
+                if pasted_title:
+                    print(f"\nPasted Title:\n{pasted_title}\n")
+                    if input("Use this title? [y/n]: ").lower() == 'y':
+                        print("\nTitle approved\n")
+                        return pasted_title
+                    else:
+                        print("\nCancelled...")
+                        continue
+                else:
+                    print("\nNo title provided, starting over...")
+                    continue
             else:
-                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                print("Invalid choice. Please enter 'a', 'd', 'm', or 'p'")
                 continue
 
     def generate_description_browser(self, title: str) -> str:
@@ -747,7 +761,7 @@ JUST OUTPUT THE DESCRIPTION IN PURE ENGLISH. Make it DETAILED and COMPREHENSIVE,
             if char_count > 5000:
                 print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
 
-            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify, [p]aste: ").lower().strip()
 
             if choice == 'a':
                 print("\nDescription approved\n")
@@ -782,8 +796,34 @@ Generate the modified description. CRITICAL: Keep it under 5000 characters. JUST
                 else:
                     print("\nStarting over...")
                     continue
+            elif choice == 'p':
+                print("\nPaste the correct description below (press Enter twice when done):")
+                print("Description:")
+                lines = []
+                while True:
+                    line = input()
+                    if line == "" and len(lines) > 0 and lines[-1] == "":
+                        lines.pop()  # Remove the last empty line
+                        break
+                    lines.append(line)
+                pasted_description = "\n".join(lines).strip()
+
+                if pasted_description:
+                    char_count = len(pasted_description)
+                    print(f"\nPasted Description ({char_count} characters):\n{pasted_description}\n")
+                    if char_count > 5000:
+                        print(f"⚠ WARNING: Description is {char_count} characters (exceeds 5000 limit)\n")
+                    if input("Use this description? [y/n]: ").lower() == 'y':
+                        print("\nDescription approved\n")
+                        return pasted_description
+                    else:
+                        print("\nCancelled...")
+                        continue
+                else:
+                    print("\nNo description provided, starting over...")
+                    continue
             else:
-                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                print("Invalid choice. Please enter 'a', 'd', 'm', or 'p'")
                 continue
 
     def generate_premise_browser(self, title: str, description: str = "") -> str:
@@ -819,7 +859,7 @@ JUST OUTPUT THE PREMISE IN PURE ENGLISH."""
 
             print(f"\nGenerated Premise:\n{premise}\n")
 
-            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify: ").lower().strip()
+            choice = input("Options: [a]pprove, [d]eny (regenerate), [m]odify, [p]aste: ").lower().strip()
 
             if choice == 'a':
                 print("\nPremise approved\n")
@@ -851,8 +891,31 @@ Generate the modified premise. JUST OUTPUT THE NEW PREMISE."""
                 else:
                     print("\nStarting over...")
                     continue
+            elif choice == 'p':
+                print("\nPaste the correct premise below (press Enter twice when done):")
+                print("Premise:")
+                lines = []
+                while True:
+                    line = input()
+                    if line == "" and len(lines) > 0 and lines[-1] == "":
+                        lines.pop()  # Remove the last empty line
+                        break
+                    lines.append(line)
+                pasted_premise = "\n".join(lines).strip()
+
+                if pasted_premise:
+                    print(f"\nPasted Premise:\n{pasted_premise}\n")
+                    if input("Use this premise? [y/n]: ").lower() == 'y':
+                        print("\nPremise approved\n")
+                        return pasted_premise
+                    else:
+                        print("\nCancelled...")
+                        continue
+                else:
+                    print("\nNo premise provided, starting over...")
+                    continue
             else:
-                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                print("Invalid choice. Please enter 'a', 'd', 'm', or 'p'")
                 continue
 
     def generate_script_segment_browser(self, title: str, premise: str, segment_num: int, total_segments: int) -> str:
@@ -1025,7 +1088,7 @@ Generate the ADDITIONAL content only:"""
             last_20_words = ' '.join(words[-20:])
             print(f"Last 20 words: ...{last_20_words}\n")
 
-            choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify: ").lower().strip()
+            choice = input("Options: [a]pprove, [d]eny (regenerate all), [m]odify, [p]aste: ").lower().strip()
 
             if choice == 'a':
                 print("\nScript approved\n")
@@ -1067,8 +1130,52 @@ JUST OUTPUT THE COMPLETE MODIFIED SCRIPT."""
                 else:
                     print("\nContinuing with modifications...")
                     continue
+            elif choice == 'p':
+                print("\nFor long scripts, you can:")
+                print("1. Type/paste directly (press Enter twice when done)")
+                print("2. Provide a file path to read from")
+                choice_method = input("\nChoose method [t]ype or [f]ile: ").lower().strip()
+
+                if choice_method == 't':
+                    print("\nPaste the correct script below (press Enter twice when done):")
+                    print("Script:")
+                    lines = []
+                    while True:
+                        line = input()
+                        if line == "" and len(lines) > 0 and lines[-1] == "":
+                            lines.pop()  # Remove the last empty line
+                            break
+                        lines.append(line)
+                    pasted_script = "\n".join(lines).strip()
+                elif choice_method == 'f':
+                    file_path = input("\nEnter file path: ").strip()
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            pasted_script = f.read().strip()
+                        print(f"✓ Loaded script from file ({len(pasted_script.split())} words)")
+                    except Exception as e:
+                        print(f"✗ Error reading file: {e}")
+                        print("\nStarting over...")
+                        continue
+                else:
+                    print("Invalid choice. Starting over...")
+                    continue
+
+                if pasted_script:
+                    script_words = len(pasted_script.split())
+                    print(f"\nPasted Script ({script_words} words)")
+                    print(f"Preview: {pasted_script[:300]}...\n")
+                    if input("Use this script? [y/n]: ").lower() == 'y':
+                        print("\nScript approved\n")
+                        return pasted_script
+                    else:
+                        print("\nCancelled...")
+                        continue
+                else:
+                    print("\nNo script provided, starting over...")
+                    continue
             else:
-                print("Invalid choice. Please enter 'a', 'd', or 'm'")
+                print("Invalid choice. Please enter 'a', 'd', 'm', or 'p'")
                 continue
 
     def translate_to_korean_browser(self, text: str, content_type: str = "text") -> str:
