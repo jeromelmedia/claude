@@ -21,6 +21,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from local_translator import LocalTranslator
 
 class VideoGenerationMacroBrowser:
     """Browser automation version - uses Claude.ai Project for content generation"""
@@ -42,6 +43,9 @@ class VideoGenerationMacroBrowser:
 
         # Browser
         self.driver = None
+
+        # Local translator
+        self.translator = LocalTranslator()
 
         print(f"Using Claude Project: {self.project_id}")
         print(f"Project URL: {self.project_url}")
@@ -1839,28 +1843,45 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             else:
                 print("Upload failed")
 
-            # === PHASE 2: TRANSLATE TO KOREAN (Browser) ===
+            # === CLOSE BROWSER ===
+            print("Closing browser...")
+            self.driver.quit()
+            print("Browser closed\n")
+
+            # === PHASE 2: TRANSLATE TO KOREAN (Local NLLB-200) ===
             print("="*50)
-            print("PHASE 2: TRANSLATE TO KOREAN")
+            print("PHASE 2: TRANSLATE TO KOREAN (OFFLINE)")
             print("="*50 + "\n")
 
-            korean_title = self.translate_to_korean_browser(english_title, "title")
-            time.sleep(5)
+            # Initialize translator (downloads model if needed)
+            self.translator.initialize()
 
-            korean_description = self.translate_to_korean_browser(english_description, "description")
-            time.sleep(5)
+            # Translate title
+            print("Translating title...")
+            korean_title = self.translator.translate(english_title)
+            if korean_title:
+                print(f"✓ Korean title: {korean_title}\n")
+            else:
+                print("✗ Title translation failed")
+                korean_title = english_title
 
-            # Translate full script using uploaded file (not chunks)
-            korean_script = self.translate_script_to_korean_browser(str(script_path))
+            # Translate description
+            print("Translating description...")
+            korean_description = self.translator.translate(english_description)
+            if korean_description:
+                print(f"✓ Korean description complete\n")
+            else:
+                print("✗ Description translation failed")
+                korean_description = english_description
 
-            # Validate translation completeness by comparing endings
-            validation_passed = self.validate_script_endings(english_script, korean_script)
-
-            if not validation_passed:
-                print("Validation failed. Exiting.")
-                if self.driver:
-                    self.driver.quit()
-                return
+            # Translate full script (with intelligent chunking for long content)
+            print("Translating script (this may take several minutes for long content)...")
+            korean_script = self.translator.translate(english_script)
+            if korean_script:
+                print(f"✓ Korean script complete ({len(korean_script.split())} words)\n")
+            else:
+                print("✗ Script translation failed")
+                korean_script = english_script
 
             # Save Korean title as separate file
             korean_title_path = self.working_dir / "video_title_korean.txt"
@@ -1877,11 +1898,6 @@ JUST OUTPUT THE COMPLETE KOREAN TRANSLATION. No explanations. Translate the FULL
             with open(korean_script_path, 'w', encoding='utf-8') as f:
                 f.write(korean_script)
             print(f"Korean files saved\n")
-
-            # === CLOSE BROWSER ===
-            print("Closing browser...")
-            self.driver.quit()
-            print("Browser closed\n")
 
             # === PHASE 3: GENERATE MEDIA (API + FFmpeg) ===
             print("="*50)
